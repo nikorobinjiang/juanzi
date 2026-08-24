@@ -1,0 +1,45 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Services\ExcelService;
+use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpFoundation\BinaryFileResponse;
+
+class ExcelController extends Controller
+{
+    public function __construct(private readonly ExcelService $excel) {}
+
+    /**
+     * 立即生成最新约课 Excel，返回下载链接
+     */
+    public function generate(): JsonResponse
+    {
+        try {
+            $result = $this->excel->generate();
+
+            return response()->json([
+                'message' => 'Excel 已生成，请尽快下载保存（可随时重新生成）。',
+                'excel' => $result,
+            ]);
+        } catch (\Throwable $e) {
+            return response()->json(['error' => 'Excel 生成失败：'.$e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * 下载已生成的 Excel
+     */
+    public function download(string $filename): BinaryFileResponse
+    {
+        // 防路径穿越
+        $filename = basename($filename);
+        $path = storage_path('app/excel/'.$filename);
+
+        if (! is_file($path)) {
+            abort(404, '文件不存在或已过期，请重新生成');
+        }
+
+        return response()->download($path, $filename);
+    }
+}
