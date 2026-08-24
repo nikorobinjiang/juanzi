@@ -14,7 +14,7 @@
     <!-- 顶栏 -->
     <header class="header">
         <div class="header-inner">
-            <a class="header-back" href="/" title="返回聊天">←</a>
+            <a class="header-back" href="/appoints" title="返回约课">←</a>
             <div class="header-info">
                 <div class="header-title">图片生成</div>
                 <div class="header-sub">上传照片 · 选择风格 · 一键出图</div>

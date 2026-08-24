@@ -47,8 +47,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 预览条清除
     $('#btnClearPreview').addEventListener('click', clearPreview);
 
-    // 顶栏 / 面板按钮
-    $('#btnExcel').addEventListener('click', () => switchMode('excel'));
+    // 面板按钮
     $('#btnGenExcel').addEventListener('click', genExcel);
 
     // 图片查看器
@@ -140,9 +139,9 @@ function send() {
 
     showLoading('正在处理…');
 
-    // 45 秒超时：防止豆包请求挂起导致一直"正在思考"
+    // 100 秒超时：豆包约课解析可能较慢（需附带约课JSON），防止请求挂起
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 45000);
+    const timer = setTimeout(() => controller.abort(), 100000);
 
     fetch('/api/chat', { method: 'POST', body: payload, signal: controller.signal })
         .then((res) => res.json())

@@ -19,8 +19,6 @@
                 <div class="header-title">好运爆棚</div>
                 <div class="header-sub">约课 · Excel · 好运</div>
             </div>
-            <a class="header-btn" href="/generate" title="图片生成">🖼️</a>
-            <button class="header-btn" id="btnExcel" title="生成Excel">📊</button>
         </div>
     </header>
 
@@ -30,7 +28,7 @@
             <p>嗨，我是好运爆棚助手 🍀</p>
             <p>你可以：</p>
             <p>📅 <b>约课</b>：发送「给小明约明天上午10点」</p>
-            <p>🖼️ <b>生成图片</b>：点右上角 🖼️ 打开图片生成页</p>
+            <p>🖼️ <b>生成图片</b>：访问 <code>/generate</code> 打开图片生成页</p>
             <p>📊 <b>约课表</b>：随时生成/下载最新 Excel</p>
             <p>❓ 还可以问我：小明什么时候上课？上了几节课？</p>
         </div>

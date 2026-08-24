@@ -101,13 +101,13 @@ class ExcelService
             $sheet->getStyle('A'.$row)->getFont()->setItalic(true)->getColor()->setARGB('888888');
         }
 
-        $statusColors = [
-            BookingRecord::STATUS_BOOKED => 'D0EBFF',
-            BookingRecord::STATUS_COMPLETED => 'D3F9D8',
-            BookingRecord::STATUS_CANCELLED => 'FFE3E3',
+        $statusFontColors = [
+            BookingRecord::STATUS_COMPLETED => '2F9E44', // 上完：绿色字体
+            BookingRecord::STATUS_BOOKED => 'E8590C',    // 未上完：橙色字体
+            BookingRecord::STATUS_CANCELLED => '868E96', // 取消：灰色字体
         ];
 
-        $items->each(function (BookingRecord $b) use ($sheet, &$row, $statusColors) {
+        $items->each(function (BookingRecord $b) use ($sheet, &$row, $statusFontColors) {
             $sheet->setCellValue('A'.$row, $b->start_at->format('Y-m-d'));
             $sheet->setCellValue('B'.$row, self::WEEKDAY_CN[$b->start_at->dayOfWeek] ?? '');
             $sheet->setCellValue('C'.$row, $b->start_at->format('H:i').'-'.$b->end_at->format('H:i'));
@@ -117,10 +117,11 @@ class ExcelService
             $sheet->setCellValue('G'.$row, $b->status_label);
             $sheet->setCellValue('H'.$row, $b->remark);
 
-            $color = $statusColors[$b->status] ?? 'FFFFFF';
-            $sheet->getStyle('G'.$row)->getFill()
-                ->setFillType(Fill::FILL_SOLID)
-                ->getStartColor()->setARGB($color);
+            // 状态列字体颜色：上完绿色 / 未上完橙色 / 取消灰色
+            if (isset($statusFontColors[$b->status])) {
+                $sheet->getStyle('G'.$row)->getFont()
+                    ->getColor()->setARGB($statusFontColors[$b->status]);
+            }
 
             // 周末日期标红
             if (in_array($b->start_at->dayOfWeek, [0, 6], true)) {
@@ -128,7 +129,7 @@ class ExcelService
             }
 
             // 行距：数据行统一加高，阅读更舒适
-            $sheet->getRowDimension($row)->setRowHeight(24);
+            $sheet->getRowDimension($row)->setRowHeight(28);
 
             $row++;
         });
@@ -154,13 +155,6 @@ class ExcelService
             ->setHorizontal(Alignment::HORIZONTAL_LEFT);
 
         $sheet->getStyle('A2:H'.$lastRow)->getAlignment()->setWrapText(true);
-
-        // 斑马纹（浅灰底）让行更易读
-        for ($r = 4; $r <= $lastRow; $r += 2) {
-            $sheet->getStyle('A'.$r.':H'.$r)->getFill()
-                ->setFillType(Fill::FILL_SOLID)
-                ->getStartColor()->setARGB('F4F6FB');
-        }
 
         $sheet->freezePane('A3');
     }
