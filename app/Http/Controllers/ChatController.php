@@ -8,8 +8,10 @@ use App\Models\Message;
 use App\Services\BookingService;
 use App\Services\DoubaoService;
 use App\Services\ExcelService;
+use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
@@ -177,10 +179,7 @@ class ChatController extends Controller
                 break;
 
             case 'query':
-                $reply = $this->doubao->answerQuery(
-                    (string) ($data['question'] ?? $text),
-                    $bookingsJson
-                );
+                $reply = $this->handleQuery($data, $text, $bookingsJson);
                 break;
 
             default:
@@ -291,6 +290,190 @@ class ChatController extends Controller
         return $result['success']
             ? $result['message'].'，表格已自动更新！'
             : $result['message'];
+    }
+
+    /* -----------------------------------------------------------------
+     | 内部：查询分发（query 意图）
+     | ----------------------------------------------------------------- */
+
+    private function handleQuery(array $data, string $fallbackText, string $bookingsJson): string
+    {
+        $type = (string) ($data['query_type'] ?? 'general');
+
+        return match ($type) {
+            'count' => $this->queryCount($data),
+            'last' => $this->queryLast($data),
+            'next' => $this->queryNext($data),
+            'schedule' => $this->querySchedule($data),
+            'coach_availability' => $this->queryCoachAvailability($data),
+            'venue_availability' => $this->queryVenueAvailability($data),
+            default => $this->doubao->answerQuery((string) ($data['question'] ?? $fallbackText), $bookingsJson),
+        };
+    }
+
+    private function queryCount(array $data): string
+    {
+        [$student, $coach] = $this->subject($data);
+        if ($student === '' && $coach === '') {
+            return '你想查谁上了几节课呢？告诉我学员或教练的名字吧。';
+        }
+
+        $count = $this->booking->countCompletedLessons($student, $coach);
+
+        return $this->subjectLabel($student, $coach).'已经上完 '.$count.' 节课了。';
+    }
+
+    private function queryLast(array $data): string
+    {
+        [$student, $coach] = $this->subject($data);
+        if ($student === '' && $coach === '') {
+            return '你想查谁上一次上课的时间呢？告诉我学员或教练的名字吧。';
+        }
+
+        $last = $this->booking->lastLesson($student, $coach);
+        if (! $last) {
+            return $this->subjectLabel($student, $coach).'还没有上过课记录。';
+        }
+
+        return $this->subjectLabel($student, $coach).'上一次课是 '.$last->start_at->format('n月j日 H:i')
+            .'（'.$last->venue.' 场地 · 教练 '.$last->coach_name.'）。';
+    }
+
+    private function queryNext(array $data): string
+    {
+        [$student, $coach] = $this->subject($data);
+        if ($student === '' && $coach === '') {
+            return '你想查谁下一次上课的时间呢？告诉我学员或教练的名字吧。';
+        }
+
+        $next = $this->booking->nextLesson($student, $coach);
+        if (! $next) {
+            return $this->subjectLabel($student, $coach).'暂时没有已预约的课程。';
+        }
+
+        return $this->subjectLabel($student, $coach).'下一次课是 '.$next->start_at->format('n月j日 H:i')
+            .'（'.$next->venue.' 场地 · 教练 '.$next->coach_name.'）。';
+    }
+
+    private function querySchedule(array $data): string
+    {
+        [$student, $coach] = $this->subject($data);
+        if ($student === '' && $coach === '') {
+            return '你想查谁的排课呢？告诉我学员或教练的名字吧。';
+        }
+
+        [$from, $to] = $this->queryDateRange($data);
+        $list = $this->booking->schedule($student, $coach, $from, $to);
+
+        if ($list->isEmpty()) {
+            return $this->subjectLabel($student, $coach)
+                .$from->format('n月j日').'至'.$to->format('n月j日').'没有查到课程安排。';
+        }
+
+        return $this->subjectLabel($student, $coach).'的课程安排：'."\n"
+            .$list->map(fn (BookingRecord $b) => '· '.$b->start_at->format('n月j日 H:i')
+                .'（'.$b->venue.' · 教练 '.$b->coach_name.' · '.$b->status_label.'）'
+                .($b->remark !== '' ? ' · '.$b->remark : ''))
+            ->implode("\n");
+    }
+
+    private function queryCoachAvailability(array $data): string
+    {
+        $coach = trim((string) ($data['coach_name'] ?? ''));
+        if ($coach === '') {
+            return '你想查哪位教练有没有空呢？告诉我教练的名字吧。';
+        }
+
+        [$from, $to] = $this->queryDateRange($data);
+
+        return $this->formatAvailability('教练 '.$coach, $this->booking->coachAvailability($coach, $from, $to));
+    }
+
+    private function queryVenueAvailability(array $data): string
+    {
+        $venue = trim((string) ($data['venue'] ?? ''));
+        if ($venue === '') {
+            return '你想查哪个场地有没有空呢？（1A / 1B / 2A / 2B）';
+        }
+
+        [$from, $to] = $this->queryDateRange($data);
+
+        return $this->formatAvailability($venue.' 场地', $this->booking->venueAvailability($venue, $from, $to));
+    }
+
+    /**
+     * 提取学员/教练名（去掉两端空格）
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function subject(array $data): array
+    {
+        return [
+            trim((string) ($data['student_name'] ?? '')),
+            trim((string) ($data['coach_name'] ?? '')),
+        ];
+    }
+
+    /**
+     * 学员/教练的称呼前缀（用于口语化回复）
+     */
+    private function subjectLabel(string $student, string $coach): string
+    {
+        if ($student !== '' && $coach !== '') {
+            return $student.'（教练 '.$coach.'）';
+        }
+        if ($student !== '') {
+            return '学员 '.$student;
+        }
+
+        return '教练 '.$coach;
+    }
+
+    /**
+     * 解析查询日期范围，默认今天到明天
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function queryDateRange(array $data): array
+    {
+        try {
+            $from = Carbon::parse((string) ($data['date_from'] ?? ''))->startOfDay();
+        } catch (\Throwable $e) {
+            $from = Carbon::today();
+        }
+
+        try {
+            $to = Carbon::parse((string) ($data['date_to'] ?? ''))->startOfDay();
+        } catch (\Throwable $e) {
+            $to = $from->copy()->addDay();
+        }
+
+        if ($to->lt($from)) {
+            $to = $from->copy()->addDay();
+        }
+
+        return [$from, $to];
+    }
+
+    /**
+     * 把空闲时段数组格式化成口语化回复
+     *
+     * @param  array<int, array{date: string, slots: array<int, string>}>  $days
+     */
+    private function formatAvailability(string $who, array $days): string
+    {
+        $lines = [];
+
+        foreach ($days as $day) {
+            $date = Carbon::parse($day['date']);
+            $label = $date->isToday() ? '今天' : $date->format('n月j日');
+
+            $lines[] = $day['slots']
+                ? $label.'空闲时段：'.implode('、', $day['slots'])
+                : $label.'没有空闲时段';
+        }
+
+        return $who.'：'."\n".implode("\n", $lines);
     }
 
     /* -----------------------------------------------------------------

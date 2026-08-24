@@ -145,8 +145,17 @@ class DoubaoService
 2. update    —— 修改已有约课（出现"改/换/调整/提前/推迟"等）
 3. delete    —— 取消/删除约课（出现"取消/删掉/退掉"等）
 4. complete  —— 课程已完成（出现"上完了/上完课/下课了/结束"等）
-5. query     —— 查询问题（询问某人上课时间、上了几节课等）
+5. query     —— 查询问题（询问上课时间、次数、空闲情况等）
 6. other     —— 闲聊或其他无关内容
+
+query 意图必须再细分 query_type（放在 data 中），规则如下：
+- count    —— 统计上了几节课（如"上了几节课/上过多少次课/还剩几节课"，统计已完成课程）
+- last     —— 上一次课是什么时候（如"上一次课/上次课/最近一次上课"）
+- next     —— 下一次课是什么时候（如"下次课/下一次什么时候上课"）
+- schedule —— 某学员/教练的排课安排（如"我什么时候上课/他这周有哪些课/课表"）
+- coach_availability —— 教练空闲查询（如"张教练今天有空吗/明天有没有课"）
+- venue_availability —— 场地空闲查询（如"1A场地明天有空吗"）
+- general  —— 其他开放问题（无法归入以上类型时）
 
 你必须返回 JSON，格式如下：
 {
@@ -159,7 +168,10 @@ class DoubaoService
     "venue": "场地，1A/1B/2A/2B，用户指定才填，否则空字符串",
     "target_id": "修改/删除/完成时尽量填对应的约课记录 id，找不到则填空",
     "new_data": {},
-    "question": "query 意图时用户的具体问题原文"
+    "question": "query 意图时用户的具体问题原文",
+    "query_type": "query 意图时的子类型：count/last/next/schedule/coach_availability/venue_availability/general，非 query 意图填空字符串",
+    "date_from": "查询起始日期 Y-m-d，默认今天",
+    "date_to": "查询结束日期 Y-m-d，默认明天"
   },
   "reply": "用一句话概括你理解到的操作（如：已识别到为小明约 2026-08-25 10:00 的课）"
 }
@@ -169,6 +181,11 @@ class DoubaoService
 - 周X 按本周(周一为一周开始)处理；"下周X"按下周处理
 - 上课默认 1 小时，无需输出 end_at
 - 时间无法确定时 start_at 填空字符串，不要瞎编
+
+query 意图的参数规则（非常重要）：
+- 空闲查询（coach_availability/venue_availability）：date_from/date_to 默认今天到明天，用户提到具体日期再覆盖
+- 计数/最近课程/排课查询：能提取到学员或教练就如实填，提取不到填空字符串，不要猜
+- "教练什么时候有空"这类问题，教练姓名填到 coach_name；"场地有空"则场地名填到 venue
 
 修改/取消/完成时的定位规则（非常重要）：
 - 用户没说哪个学员、什么时间时（如只说"取消预约"），student_name 和 start_at 都填空字符串，不要猜，系统会提示用户补全

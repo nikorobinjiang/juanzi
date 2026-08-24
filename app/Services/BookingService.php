@@ -34,6 +34,22 @@ class BookingService
         $endAt = $startAt->copy()->addMinutes($duration);
 
         $venue = trim((string) ($data['venue'] ?? ''));
+        $coach = trim((string) ($data['coach_name'] ?? ''));
+
+        // 教练冲突：同一教练同一时间只能带一节课（与场地无关，先校验）
+        if ($coach !== '') {
+            $coachConflict = $this->checkCoachConflict($coach, $startAt, $endAt);
+            if ($coachConflict) {
+                return [
+                    'success' => false,
+                    'booking' => null,
+                    'conflict' => $coachConflict,
+                    'message' => '教练冲突：教练「'.$coach.'」在 '.$startAt->format('m月d日 H:i')
+                        .' 已有课（'.$coachConflict->student_name.' · 场地 '.$coachConflict->venue.'），'
+                        .'同一时间只能带一个学员，请换个时间。',
+                ];
+            }
+        }
 
         if ($venue === '') {
             // 自动分配：挑第一个空闲场地
@@ -100,32 +116,59 @@ class BookingService
             return ['success' => false, 'booking' => null, 'message' => '找不到要修改的约课记录'];
         }
 
-        if (array_key_exists('start_at', $data) && $data['start_at']) {
-            $startAt = Carbon::parse($data['start_at']);
-            $duration = (int) config('doubao.booking.duration_minutes', 60);
-            $endAt = $startAt->copy()->addMinutes($duration);
+        // 计算修改后的目标值（未提供的字段沿用原值）
+        $newStartAt = array_key_exists('start_at', $data) && $data['start_at']
+            ? Carbon::parse($data['start_at'])
+            : $booking->start_at;
+        $newCoach = array_key_exists('coach_name', $data) && $data['coach_name']
+            ? trim($data['coach_name'])
+            : $booking->coach_name;
+        $newVenue = array_key_exists('venue', $data) && $data['venue']
+            ? trim($data['venue'])
+            : $booking->venue;
 
-            $venue = trim((string) ($data['venue'] ?? $booking->venue));
-            $conflict = $this->checkConflict($venue, $startAt, $endAt, $booking->id);
+        $duration = (int) config('doubao.booking.duration_minutes', 60);
+        $newEndAt = $newStartAt->copy()->addMinutes($duration);
+
+        $timeChanged = $newStartAt->ne($booking->start_at);
+        $venueChanged = $newVenue !== $booking->venue;
+        $coachChanged = $newCoach !== $booking->coach_name;
+
+        // 时间或场地变化 → 场地冲突检测
+        if ($timeChanged || $venueChanged) {
+            $conflict = $this->checkConflict($newVenue, $newStartAt, $newEndAt, $booking->id);
             if ($conflict) {
                 return [
                     'success' => false,
                     'booking' => $booking,
-                    'message' => '修改失败，场地冲突：'.$venue.' 场地在 '.$startAt->format('m月d日 H:i')
+                    'message' => '修改失败，场地冲突：'.$newVenue.' 场地在 '.$newStartAt->format('m月d日 H:i')
                         .' 已被占用（'.$conflict->student_name.' / '.$conflict->coach_name.'）。',
                 ];
             }
-
-            $booking->start_at = $startAt;
-            $booking->end_at = $endAt;
-            $booking->venue = $venue;
         }
 
+        // 时间或教练变化 → 教练冲突检测
+        if ($timeChanged || $coachChanged) {
+            $conflict = $this->checkCoachConflict($newCoach, $newStartAt, $newEndAt, $booking->id);
+            if ($conflict) {
+                return [
+                    'success' => false,
+                    'booking' => $booking,
+                    'message' => '修改失败，教练冲突：教练「'.$newCoach.'」在 '.$newStartAt->format('m月d日 H:i')
+                        .' 已有课（'.$conflict->student_name.' · 场地 '.$conflict->venue.'），'
+                        .'同一时间只能带一个学员。',
+                ];
+            }
+        }
+
+        $booking->start_at = $newStartAt;
+        $booking->end_at = $newEndAt;
+        $booking->venue = $newVenue;
+        if ($coachChanged) {
+            $booking->coach_name = $newCoach;
+        }
         if (array_key_exists('student_name', $data) && $data['student_name']) {
             $booking->student_name = trim($data['student_name']);
-        }
-        if (array_key_exists('coach_name', $data) && $data['coach_name']) {
-            $booking->coach_name = trim($data['coach_name']);
         }
         if (array_key_exists('remark', $data) && $data['remark'] !== null) {
             $booking->remark = trim($data['remark']);
@@ -202,6 +245,24 @@ class BookingService
             ->first();
     }
 
+    /**
+     * 检测某教练在时间段内是否冲突（同一教练同一时间只能带一节课，跳过 ignoreId）
+     */
+    public function checkCoachConflict(string $coach, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): ?BookingRecord
+    {
+        return BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
+            ->where('id', '!=', $ignoreId ?? 0)
+            ->where(function ($q) use ($startAt, $endAt) {
+                $q->whereBetween('start_at', [$startAt, $endAt->copy()->subSecond()])
+                    ->orWhereBetween('end_at', [$startAt->copy()->addSecond(), $endAt])
+                    ->orWhere(function ($q2) use ($startAt, $endAt) {
+                        $q2->where('start_at', '<', $startAt)->where('end_at', '>', $endAt);
+                    });
+            })
+            ->first();
+    }
+
     /* -----------------------------------------------------------------
      | 查询
      | ----------------------------------------------------------------- */
@@ -209,6 +270,142 @@ class BookingService
     public function all(): Collection
     {
         return BookingRecord::orderBy('start_at')->orderBy('venue')->get();
+    }
+
+    /* -----------------------------------------------------------------
+     | 本地精确查询（统计 / 最近课程 / 排课 / 空闲时段）
+     | ----------------------------------------------------------------- */
+
+    /**
+     * 统计某学员/教练已完成课程数（仅 status=completed）
+     */
+    public function countCompletedLessons(string $student = '', string $coach = ''): int
+    {
+        return $this->scopedQuery($student, $coach)
+            ->where('status', BookingRecord::STATUS_COMPLETED)
+            ->count();
+    }
+
+    /**
+     * 最近一次已完成课程
+     */
+    public function lastLesson(string $student = '', string $coach = ''): ?BookingRecord
+    {
+        return $this->scopedQuery($student, $coach)
+            ->where('status', BookingRecord::STATUS_COMPLETED)
+            ->orderByDesc('start_at')
+            ->first();
+    }
+
+    /**
+     * 下一次课（已预约且未开始）
+     */
+    public function nextLesson(string $student = '', string $coach = ''): ?BookingRecord
+    {
+        return $this->scopedQuery($student, $coach)
+            ->where('status', BookingRecord::STATUS_BOOKED)
+            ->where('start_at', '>=', Carbon::now())
+            ->orderBy('start_at')
+            ->first();
+    }
+
+    /**
+     * 某学员/教练在时间段内的排课（默认未来 30 天，不含已取消）
+     */
+    public function schedule(string $student = '', string $coach = '', ?Carbon $from = null, ?Carbon $to = null): Collection
+    {
+        return $this->scopedQuery($student, $coach)
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
+            ->when($from, fn ($q) => $q->where('start_at', '>=', $from))
+            ->when($to, fn ($q) => $q->where('start_at', '<', $to->copy()->addDay()))
+            ->orderBy('start_at')
+            ->get();
+    }
+
+    /**
+     * 教练空闲时段：from 到 to（含）按天输出营业时段内的空闲段
+     *
+     * @return array<int, array{date: string, slots: array<int, string>}>
+     */
+    public function coachAvailability(string $coach, Carbon $from, Carbon $to): array
+    {
+        return $this->buildAvailability($from, $to, BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
+            ->where('start_at', '<', $to->copy()->addDay())
+            ->where('end_at', '>', $from)
+            ->get());
+    }
+
+    /**
+     * 场地空闲时段：from 到 to（含）按天输出营业时段内的空闲段
+     *
+     * @return array<int, array{date: string, slots: array<int, string>}>
+     */
+    public function venueAvailability(string $venue, Carbon $from, Carbon $to): array
+    {
+        return $this->buildAvailability($from, $to, BookingRecord::where('venue', $venue)
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
+            ->where('start_at', '<', $to->copy()->addDay())
+            ->where('end_at', '>', $from)
+            ->get());
+    }
+
+    /**
+     * 生成空闲时段列表：每天按营业时间（hours.start ~ hours.end，每 duration 一段），
+     * 与给定已占用记录时间段重叠的时段视为忙碌。
+     *
+     * @param  Collection<int, BookingRecord>  $booked
+     * @return array<int, array{date: string, slots: array<int, string>}>
+     */
+    private function buildAvailability(Carbon $from, Carbon $to, Collection $booked): array
+    {
+        $startHour = (int) config('doubao.booking.hours.start', 8);
+        $endHour = (int) config('doubao.booking.hours.end', 22);
+        $duration = max(60, (int) config('doubao.booking.duration_minutes', 60));
+        $stepHours = max(1, (int) round($duration / 60));
+
+        $result = [];
+        $day = $from->copy()->startOfDay();
+        $lastDay = $to->copy()->startOfDay();
+
+        while ($day->lte($lastDay)) {
+            $slots = [];
+
+            for ($hour = $startHour; $hour < $endHour; $hour += $stepHours) {
+                $slotStart = $day->copy()->setTime($hour, 0);
+                $slotEnd = $slotStart->copy()->addMinutes($duration);
+
+                $busy = $booked->contains(function (BookingRecord $b) use ($slotStart, $slotEnd) {
+                    return $b->start_at->lt($slotEnd) && $b->end_at->gt($slotStart);
+                });
+
+                if (! $busy) {
+                    $slots[] = $slotStart->format('H:i').'-'.$slotEnd->format('H:i');
+                }
+            }
+
+            $result[] = ['date' => $day->format('Y-m-d'), 'slots' => $slots];
+            $day->addDay();
+        }
+
+        return $result;
+    }
+
+    /**
+     * 按学员/教练名模糊过滤的基础查询（任一为空则不过滤该维度）
+     */
+    private function scopedQuery(string $student = '', string $coach = '')
+    {
+        $query = BookingRecord::query();
+
+        if ($student !== '') {
+            $query->where('student_name', 'like', '%'.$student.'%');
+        }
+        if ($coach !== '') {
+            $query->where('coach_name', 'like', '%'.$coach.'%');
+        }
+
+        return $query;
     }
 
     /**
