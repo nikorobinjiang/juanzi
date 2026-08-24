@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\BookingRecord;
 use App\Models\GeneratedImage;
 use App\Models\Message;
 use App\Services\BookingService;
@@ -211,6 +212,11 @@ class ChatController extends Controller
             return '好的，请问学员是谁、约什么时候的课呢？（例如：给小明约明天上午10点）';
         }
 
+        $student = trim((string) ($data['student_name'] ?? ''));
+        if ($student === '') {
+            return '好的，请问是哪位学员约课呢？';
+        }
+
         $result = $this->booking->create($data);
 
         if (! $result['success']) {
@@ -222,13 +228,25 @@ class ChatController extends Controller
 
     private function doUpdate(array $data): string
     {
-        $target = $this->booking->findTarget($data);
+        $located = $this->booking->locateTarget($data);
 
-        if (! $target) {
-            return '找不到要修改的约课记录，请提供学员姓名和原上课时间。';
+        if ($located['need_info']) {
+            return $located['message'];
+        }
+        if (! $located['success'] || ! $located['booking']) {
+            return $located['message'];
         }
 
-        $result = $this->booking->update($target->id, (array) ($data['new_data'] ?? $data));
+        $newData = array_filter(
+            (array) ($data['new_data'] ?? $data),
+            fn ($v) => $v !== null && $v !== ''
+        );
+
+        if (empty($newData)) {
+            return '想怎么调整呢？例如：把时间改到明天下午2点，或换个场地。';
+        }
+
+        $result = $this->booking->update($located['booking']->id, $newData);
 
         return $result['success']
             ? $result['message'].'，约课表已更新！'
@@ -237,23 +255,35 @@ class ChatController extends Controller
 
     private function doDelete(array $data): string
     {
-        $target = $this->booking->findTarget($data);
+        $located = $this->booking->locateTarget($data);
 
-        if (! $target) {
-            return '找不到要删除的约课记录，请提供学员姓名和上课时间。';
+        if ($located['need_info']) {
+            return $located['message'];
+        }
+        if (! $located['success'] || ! $located['booking']) {
+            return $located['message'];
         }
 
-        $result = $this->booking->delete($target->id);
+        $result = $this->booking->delete($located['booking']->id);
 
         return $result['success'] ? $result['message'].'，约课表已更新！' : $result['message'];
     }
 
     private function doComplete(array $data): string
     {
-        $target = $this->booking->findTarget($data);
+        $located = $this->booking->locateTarget($data);
 
-        if (! $target) {
-            return '找不到对应的约课记录，请告诉我哪个学员几点上完了课。';
+        if ($located['need_info']) {
+            return $located['message'];
+        }
+        if (! $located['success'] || ! $located['booking']) {
+            return $located['message'];
+        }
+
+        $target = $located['booking'];
+
+        if ($target->status === BookingRecord::STATUS_COMPLETED) {
+            return $target->student_name.' '.$target->start_at->format('n月j日 H:i').' 这节课已经标记完成啦，不用重复操作。';
         }
 
         $result = $this->booking->complete($target->id);

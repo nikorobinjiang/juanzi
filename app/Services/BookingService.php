@@ -275,26 +275,113 @@ class BookingService
     }
 
     /**
-     * 根据用户提供的定位信息找到目标记录（供修改/删除/完成使用）
+     * 根据用户提供的定位信息定位目标记录，并校验信息是否足够明确
+     *
+     * 定位信息：target_id / student_name / coach_name / start_at
+     * - 未提供任何定位信息 → need_info=true，由调用方提示用户补全
+     * - 多条匹配 → need_info=true，附候选项，请用户补充更具体的信息
+     * - 唯一命中 → success=true
+     *
+     * @return array{
+     *     success: bool,
+     *     need_info: bool,
+     *     booking: ?BookingRecord,
+     *     candidates: array,
+     *     message: string,
+     * }
      */
-    public function findTarget(array $data): ?BookingRecord
+    public function locateTarget(array $data): array
     {
-        $query = BookingRecord::query();
+        $targetId = (int) ($data['target_id'] ?? 0);
+        $student = trim((string) ($data['student_name'] ?? ''));
+        $coach = trim((string) ($data['coach_name'] ?? ''));
+        $startAtRaw = trim((string) ($data['start_at'] ?? ''));
 
-        if (! empty($data['target_id'])) {
-            return BookingRecord::find((int) $data['target_id']);
-        }
+        // 有明确 id 直接命中
+        if ($targetId) {
+            $booking = BookingRecord::find($targetId);
 
-        if (! empty($data['student_name'])) {
-            $query->where('student_name', 'like', '%'.trim($data['student_name']).'%');
-        }
-        if (! empty($data['coach_name'])) {
-            $query->where('coach_name', 'like', '%'.trim($data['coach_name']).'%');
-        }
-        if (! empty($data['start_at'])) {
-            $query->where('start_at', 'like', '%'.Carbon::parse($data['start_at'])->format('Y-m-d H:i').'%');
+            return $booking
+                ? ['success' => true, 'need_info' => false, 'booking' => $booking, 'candidates' => [], 'message' => '']
+                : ['success' => false, 'need_info' => false, 'booking' => null, 'candidates' => [], 'message' => '找不到对应的约课记录，可能已经被删除了。'];
         }
 
-        return $query->orderBy('start_at', 'desc')->first();
+        // 没有任何定位信息 → 提示补全
+        if ($student === '' && $coach === '' && $startAtRaw === '') {
+            return [
+                'success' => false,
+                'need_info' => true,
+                'booking' => null,
+                'candidates' => [],
+                'message' => '请告诉我是哪位学员、什么时间的课，我再帮你处理。',
+            ];
+        }
+
+        $query = BookingRecord::query()
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED);
+
+        if ($student !== '') {
+            $query->where('student_name', 'like', '%'.$student.'%');
+        }
+        if ($coach !== '') {
+            $query->where('coach_name', 'like', '%'.$coach.'%');
+        }
+        if ($startAtRaw !== '') {
+            try {
+                $query->where('start_at', 'like', '%'.Carbon::parse($startAtRaw)->format('Y-m-d H:i').'%');
+            } catch (\Throwable $e) {
+                // 时间无法解析时忽略该条件，避免查询报错
+            }
+        }
+
+        $candidates = $query->orderBy('start_at')->orderBy('venue')->get();
+
+        if ($candidates->isEmpty()) {
+            return [
+                'success' => false,
+                'need_info' => false,
+                'booking' => null,
+                'candidates' => [],
+                'message' => $this->locateNotFoundMessage($student, $coach, $startAtRaw),
+            ];
+        }
+
+        if ($candidates->count() === 1) {
+            return ['success' => true, 'need_info' => false, 'booking' => $candidates->first(), 'candidates' => [], 'message' => ''];
+        }
+
+        // 多条匹配 → 列出候选项，请用户补充信息
+        $list = $candidates
+            ->map(fn (BookingRecord $b) => '· '.$b->student_name.'（'.$b->coach_name.'）'.$b->start_at->format('n月j日 H:i').' · '.$b->venue)
+            ->implode("\n");
+
+        return [
+            'success' => false,
+            'need_info' => true,
+            'booking' => null,
+            'candidates' => $candidates->all(),
+            'message' => '找到了几条记录，请再告诉我更具体的信息（比如上课时间）：'."\n".$list,
+        ];
+    }
+
+    private function locateNotFoundMessage(string $student, string $coach, string $startAtRaw): string
+    {
+        $parts = [];
+
+        if ($student !== '') {
+            $parts[] = '学员「'.$student.'」';
+        }
+        if ($coach !== '') {
+            $parts[] = '教练「'.$coach.'」';
+        }
+        if ($startAtRaw !== '') {
+            try {
+                $parts[] = Carbon::parse($startAtRaw)->format('n月j日 H:i');
+            } catch (\Throwable $e) {
+                $parts[] = '该时间段';
+            }
+        }
+
+        return $parts ? '没有找到'.implode('、', $parts).'的约课记录。' : '没有找到匹配的约课记录。';
     }
 }
