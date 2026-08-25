@@ -147,6 +147,21 @@ class AuthOrganizationTest extends TestCase
         $this->postJson('/api/chat', ['message' => '你好'])->assertStatus(401);
     }
 
+    /** 登录成功后 API 应可访问（回归：api 组无 session 中间件导致 401 → 前端反复跳登录闪刷新） */
+    public function test_logged_in_user_can_call_api(): void
+    {
+        $this->makeUser('xiaoming', 'swim');
+
+        $this->post('/login', [
+            'organization_code' => 'swim',
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+        ])->assertRedirect('/appoints');
+
+        // 登录态应通过 session 延续到 API 请求
+        $this->getJson('/api/booking')->assertOk();
+    }
+
     /** 跨机构数据不可见：A 机构约课 B 机构通过 Eloquent 与 API 均查不到 */
     public function test_cross_organization_data_invisible(): void
     {
