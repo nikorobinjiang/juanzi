@@ -8,6 +8,20 @@ const state = {
 
 const $ = (sel) => document.querySelector(sel);
 
+/* ---------------- 统一请求（登录态 + 401 跳转） ---------------- */
+function apiFetch(url, options) {
+    const opts = options || {};
+    opts.headers = Object.assign({ Accept: 'application/json' }, opts.headers || {});
+    return fetch(url, opts).then((res) => {
+        if (res.status === 401) {
+            location.replace('/login');
+            // 返回永不 resolve 的 Promise，阻止后续回调继续执行
+            return new Promise(() => {});
+        }
+        return res;
+    });
+}
+
 const elMessages = $('#messages');
 const elInput = $('#inputText');
 const elSend = $('#btnSend');
@@ -143,7 +157,7 @@ function send() {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 100000);
 
-    fetch('/api/chat', { method: 'POST', body: payload, signal: controller.signal })
+    apiFetch('/api/chat', { method: 'POST', body: payload, signal: controller.signal })
         .then((res) => res.json())
         .then((data) => {
             if (data.error) throw new Error(data.error);
@@ -214,7 +228,7 @@ function excelCardHTML(excel) {
 
 /* ---------------- 约课表面板 ---------------- */
 function loadWeekly() {
-    fetch('/api/booking')
+    apiFetch('/api/booking')
         .then((res) => res.json())
         .then((data) => {
             const weeks = data.weeks || [];
@@ -266,7 +280,7 @@ function renderWeekly(weeks) {
 /* ---------------- 生成Excel ---------------- */
 function genExcel() {
     showLoading('正在生成 Excel…');
-    fetch('/api/excel/generate')
+    apiFetch('/api/excel/generate')
         .then((res) => res.json())
         .then((data) => {
             hideLoading();
@@ -290,7 +304,7 @@ function genExcel() {
 
 /* ---------------- 历史消息 ---------------- */
 function loadHistory() {
-    fetch('/api/messages?limit=50')
+    apiFetch('/api/messages?limit=50')
         .then((res) => res.json())
         .then((data) => {
             const msgs = data.messages || [];

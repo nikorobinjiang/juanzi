@@ -50,7 +50,9 @@ class ExcelService
             mkdir($dir, 0755, true);
         }
 
-        $filename = '约课表_'.now()->format('Ymd_His').'.xlsx';
+        // 文件名带机构前缀，下载时按前缀校验归属，防止跨机构访问
+        $orgCode = auth('web')->user()?->organization_code ?? 'guest';
+        $filename = $orgCode.'_约课表_'.now()->format('Ymd_His').'.xlsx';
         $path = $dir.DIRECTORY_SEPARATOR.$filename;
 
         $writer = new Xlsx($spreadsheet);

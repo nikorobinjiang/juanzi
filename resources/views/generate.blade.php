@@ -19,6 +19,10 @@
                 <div class="header-title">图片生成</div>
                 <div class="header-sub">上传照片 · 选择风格 · 一键出图</div>
             </div>
+            <form method="POST" action="{{ url('/logout') }}" class="header-user">
+                @csrf
+                <button class="logout-btn" type="submit">退出</button>
+            </form>
         </div>
     </header>
 

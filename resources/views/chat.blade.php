@@ -1,3 +1,8 @@
+@php
+    $orgName = collect(config('organizations.list'))
+        ->firstWhere('code', auth()->user()?->organization_code)['name']
+        ?? auth()->user()?->organization_code ?? '';
+@endphp
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -18,6 +23,13 @@
             <div class="header-info">
                 <div class="header-title">好运爆棚</div>
                 <div class="header-sub">约课 · Excel · 好运</div>
+            </div>
+            <div class="header-user">
+                <span class="user-badge" title="{{ $orgName }} · {{ auth()->user()->username }}">{{ $orgName }} · {{ auth()->user()->username }}</span>
+                <form method="POST" action="{{ url('/logout') }}">
+                    @csrf
+                    <button class="logout-btn" type="submit">退出</button>
+                </form>
             </div>
         </div>
     </header>

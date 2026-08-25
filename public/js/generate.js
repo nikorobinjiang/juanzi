@@ -25,6 +25,20 @@
     var selectedStyle = null;
     var currentFile = null;
 
+    /* 统一请求：带 Accept json，401 时跳转登录页 */
+    function apiFetch(url, options) {
+        var opts = options || {};
+        opts.headers = Object.assign({ Accept: 'application/json' }, opts.headers || {});
+        return fetch(url, opts).then(function (res) {
+            if (res.status === 401) {
+                location.replace('/login');
+                // 返回永不 resolve 的 Promise，阻止后续回调继续执行
+                return new Promise(function () {});
+            }
+            return res;
+        });
+    }
+
     /* ---------- 风格选择 ---------- */
     var styleCards = document.querySelectorAll('.style-card');
     styleCards.forEach(function (card) {
@@ -90,7 +104,7 @@
         var controller = new AbortController();
         var timer = setTimeout(function () { controller.abort(); }, 120000);
 
-        fetch('/api/generate', { method: 'POST', body: fd, signal: controller.signal })
+        apiFetch('/api/generate', { method: 'POST', body: fd, signal: controller.signal })
             .then(function (res) {
                 return res.json().then(function (data) {
                     if (!res.ok) { var err = new Error((data && data.error) || ('请求失败 ' + res.status)); err.status = res.status; throw err; }
@@ -119,7 +133,7 @@
 
     /* ---------- 历史记录 ---------- */
     function loadHistory() {
-        fetch('/api/generate/history?limit=9')
+        apiFetch('/api/generate/history?limit=9')
             .then(function (res) { return res.json(); })
             .then(function (data) {
                 var items = data && data.items ? data.items : [];

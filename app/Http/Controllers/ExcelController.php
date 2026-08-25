@@ -36,6 +36,12 @@ class ExcelController extends Controller
         $filename = basename($filename);
         $path = storage_path('app/excel/'.$filename);
 
+        // 机构隔离：文件名必须以当前机构 code 开头，防止跨机构下载
+        $orgCode = auth('web')->user()?->organization_code ?? '';
+        if ($orgCode === '' || ! str_starts_with($filename, $orgCode.'_')) {
+            abort(404, '文件不存在或已过期，请重新生成');
+        }
+
         if (! is_file($path)) {
             abort(404, '文件不存在或已过期，请重新生成');
         }
