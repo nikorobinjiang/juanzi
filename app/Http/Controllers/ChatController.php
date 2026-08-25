@@ -179,7 +179,7 @@ class ChatController extends Controller
                 break;
 
             case 'query':
-                $reply = $this->handleQuery($data, $text, $bookingsJson);
+                $reply = $this->handleQuery($data, $text, $bookingsJson, (string) ($parsed['reply'] ?? ''));
                 break;
 
             default:
@@ -296,7 +296,7 @@ class ChatController extends Controller
      | 内部：查询分发（query 意图）
      | ----------------------------------------------------------------- */
 
-    private function handleQuery(array $data, string $fallbackText, string $bookingsJson): string
+    private function handleQuery(array $data, string $fallbackText, string $bookingsJson, string $aiReply = ''): string
     {
         $type = (string) ($data['query_type'] ?? 'general');
 
@@ -307,7 +307,10 @@ class ChatController extends Controller
             'schedule' => $this->querySchedule($data),
             'coach_availability' => $this->queryCoachAvailability($data),
             'venue_availability' => $this->queryVenueAvailability($data),
-            default => $this->doubao->answerQuery((string) ($data['question'] ?? $fallbackText), $bookingsJson),
+            // general：复用 parseBookingAction 时豆包已生成的完整回答，避免第二次串行调用（省一半等待时间）
+            default => trim($aiReply) !== ''
+                ? $aiReply
+                : $this->doubao->answerQuery((string) ($data['question'] ?? $fallbackText), $bookingsJson),
         };
     }
 

@@ -151,7 +151,7 @@ function send() {
     state.sending = true;
     setSendingUI(true);
 
-    showLoading('正在处理…');
+    showTypingLoading();
 
     // 100 秒超时：豆包约课解析可能较慢（需附带约课JSON），防止请求挂起
     const controller = new AbortController();
@@ -174,7 +174,7 @@ function send() {
         })
         .catch((err) => {
             const msg = err.name === 'AbortError'
-                ? '请求超时了（超过45秒），豆包可能暂时无响应，请稍后重试。'
+                ? '请求超时了（超过100秒），豆包可能暂时无响应，请稍后重试。'
                 : '出错了：' + err.message;
             appendMessage({ role: 'assistant', type: 'text', content: msg });
         })
@@ -333,13 +333,38 @@ function setSendingUI(loading) {
     elSend.textContent = loading ? '…' : '发送';
 }
 
+let loadingTicker = null;
+
+const TYPING_TIPS = [
+    '正在理解你的消息…',
+    '正在查询约课数据…',
+    '豆包正在生成回复，可能需要几十秒，请稍候…',
+    '仍在处理中，请耐心等待…',
+];
+
 function showLoading(text) {
     elLoadingText.textContent = text || '正在思考…';
     elLoading.hidden = false;
 }
 
+/* 发送消息后的动态提示：每 8 秒轮换文案，避免用户以为卡死 */
+function showTypingLoading() {
+    let i = 0;
+    elLoadingText.textContent = TYPING_TIPS[0];
+    elLoading.hidden = false;
+    if (loadingTicker) clearInterval(loadingTicker);
+    loadingTicker = setInterval(() => {
+        i = (i + 1) % TYPING_TIPS.length;
+        elLoadingText.textContent = TYPING_TIPS[i];
+    }, 8000);
+}
+
 function hideLoading() {
     elLoading.hidden = true;
+    if (loadingTicker) {
+        clearInterval(loadingTicker);
+        loadingTicker = null;
+    }
 }
 
 function scrollToBottom() {
