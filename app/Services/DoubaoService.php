@@ -323,6 +323,9 @@ PROMPT;
 
     /**
      * 把本地图片文件转成 base64 data URL，URL 直接返回
+     *
+     * 优先压缩再编码：手机截图动辄 2-5MB，base64 后 3-7MB，视觉模型处理大图非常慢、
+     * 容易撞上超时。GD 可用时压缩到长边 1280、JPEG 质量 75，请求体可降到几百 KB。
      */
     private function resolveImageRef(string $pathOrUrl): string
     {
@@ -334,10 +337,59 @@ PROMPT;
             throw new RuntimeException("找不到图片文件：{$pathOrUrl}");
         }
 
+        // 优先走 GD 压缩（输出统一 JPEG，体积小、视觉模型处理快）
+        $compressed = $this->compressImage($pathOrUrl);
+        if ($compressed !== null) {
+            return 'data:image/jpeg;base64,'.base64_encode($compressed);
+        }
+
+        // 无 GD / 压缩失败：原样 base64（保留原格式）
         $mime = mime_content_type($pathOrUrl) ?: 'image/jpeg';
-        $base64 = base64_encode(file_get_contents($pathOrUrl));
+        $base64 = base64_encode((string) file_get_contents($pathOrUrl));
 
         return "data:{$mime};base64,{$base64}";
+    }
+
+    /**
+     * 用 GD 压缩本地图片：长边超过 $maxEdge 缩放到 $maxEdge，输出 JPEG 质量 $quality。
+     * 小图/无法解码/无 GD 扩展时返回 null（调用方走原样 base64 兜底）。
+     */
+    private function compressImage(string $path, int $maxEdge = 1280, int $quality = 75): ?string
+    {
+        if (! extension_loaded('gd')) {
+            return null;
+        }
+
+        $size = @getimagesize($path);
+        if ($size === false || $size[0] < 1 || $size[1] < 1) {
+            return null;
+        }
+
+        [$w, $h] = $size;
+        if ($w <= $maxEdge && $h <= $maxEdge) {
+            return null; // 小图不需要压缩，保持原样
+        }
+
+        $scale = min($maxEdge / $w, $maxEdge / $h, 1.0);
+        $nw = max(1, (int) round($w * $scale));
+        $nh = max(1, (int) round($h * $scale));
+
+        $src = @imagecreatefromstring((string) file_get_contents($path));
+        if ($src === false) {
+            return null;
+        }
+
+        $dst = imagecreatetruecolor($nw, $nh);
+        imagecopyresampled($dst, $src, 0, 0, 0, 0, $nw, $nh, $w, $h);
+
+        ob_start();
+        $ok = imagejpeg($dst, null, $quality);
+        $data = ob_get_clean();
+
+        imagedestroy($src);
+        imagedestroy($dst);
+
+        return $ok ? ($data === false ? null : $data) : null;
     }
 
     /**

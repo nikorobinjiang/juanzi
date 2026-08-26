@@ -153,9 +153,9 @@ function send() {
 
     showTypingLoading();
 
-    // 100 秒超时：豆包约课解析可能较慢（需附带约课JSON），防止请求挂起
+    // 180 秒超时：豆包约课解析可能较慢（需附带约课JSON），防止请求挂起
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 100000);
+    const timer = setTimeout(() => controller.abort(), 180000);
 
     apiFetch('/api/chat', { method: 'POST', body: payload, signal: controller.signal })
         .then((res) => res.json())

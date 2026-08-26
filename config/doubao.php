@@ -68,7 +68,7 @@ return [
     | 调用豆包的超时时间（秒）
     | 保持小于 PHP max_execution_time，确保超时由 Guzzle 抛出可捕获的异常
     */
-    'timeout' => (int) env('DOUBAO_TIMEOUT', 90),
+    'timeout' => (int) env('DOUBAO_TIMEOUT', 150),
 
     /*
     | 图片生成超时时间（秒）
