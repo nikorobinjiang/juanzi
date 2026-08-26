@@ -166,7 +166,7 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
     "start_at": "上课开始时间，格式 Y-m-d H:i，必须是完整可计算的时间",
     "remark": "备注，没有则空字符串",
     "venue": "场地，1A/1B/2A/2B，用户指定才填，否则空字符串",
-    "target_id": "修改/删除/完成时尽量填对应的约课记录 id，找不到则填空",
+    "target_id": "始终填 0（不要尝试在约课记录里查找 id，系统会自动按学员/时间匹配定位）",
     "new_data": {},
     "question": "query 意图时用户的具体问题原文",
     "query_type": "query 意图时的子类型：count/last/next/schedule/coach_availability/venue_availability/general，非 query 意图填空字符串",
@@ -191,7 +191,7 @@ query 意图的参数规则（非常重要）：
 修改/取消/完成时的定位规则（非常重要）：
 - 用户没说哪个学员、什么时间时（如只说"取消预约"），student_name 和 start_at 都填空字符串，不要猜，系统会提示用户补全
 - 用户只说了学员没说时间，或只说了时间没说学员，就按用户说的如实填，不要擅自补充
-- update 意图时：要改成的新内容放在 new_data 对象里（如 {"start_at": "2026-08-25 14:00"}、{"venue": "1A"}）；原记录用 target_id 定位，没有 id 则用原学员/原时间定位
+- update 意图时：要改成的新内容放在 new_data 对象里（如 {"start_at": "2026-08-25 14:00"}、{"venue": "1A"}）；原记录由系统按学员/时间自动匹配，把原学员名、原时间如实填到 student_name/start_at 即可，不需要填 target_id
 PROMPT;
 
         // 用户消息 = 文字 + 可能的截图

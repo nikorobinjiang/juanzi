@@ -454,8 +454,12 @@ class BookingService
      */
     public function toJsonForAI(): string
     {
+        // 只取最近的记录：取消/修改都是针对近期课程，全量 JSON 会让豆包 prompt 过大、响应变慢甚至超时
         return $this->all()
             ->reject(fn (BookingRecord $b) => $b->status === BookingRecord::STATUS_CANCELLED)
+            ->sortByDesc('start_at')
+            ->take(100)
+            ->sortBy('start_at')
             ->map(function (BookingRecord $b) {
                 return [
                     'id' => $b->id,

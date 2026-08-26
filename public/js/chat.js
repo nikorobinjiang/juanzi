@@ -174,7 +174,7 @@ function send() {
         })
         .catch((err) => {
             const msg = err.name === 'AbortError'
-                ? '请求超时了（超过100秒），豆包可能暂时无响应，请稍后重试。'
+                ? '处理超时：豆包响应较慢（可能正处高峰期）。您的约课请求可能已处理，请稍后刷新约课表确认，避免重复发送。'
                 : '出错了：' + err.message;
             appendMessage({ role: 'assistant', type: 'text', content: msg });
         })
