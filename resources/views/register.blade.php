@@ -6,6 +6,7 @@
     <meta name="theme-color" content="#4C6EF5">
     <title>注册 · 好运爆棚</title>
     <link rel="stylesheet" href="{{ asset('css/auth.css') }}?v={{ filemtime(public_path('css/auth.css')) }}">
+    <script>window.CSRF_TOKEN = @json(csrf_token());</script>
 </head>
 <body>
 
@@ -58,6 +59,15 @@
                 @error('organization_code') <span class="field-error">{{ $message }}</span> @enderror
             </div>
 
+            <div class="form-group">
+                <label class="form-label" for="organization_auth_code">机构认证码</label>
+                <input class="form-input" id="organization_auth_code" name="organization_auth_code" type="text"
+                       value="{{ old('organization_auth_code') }}" placeholder="6 位字母或数字" required
+                       maxlength="6" autocomplete="off" inputmode="text">
+                <div class="auth-code-tip" id="authCodeTip"></div>
+                @error('organization_auth_code') <span class="field-error">{{ $message }}</span> @enderror
+            </div>
+
             <button class="btn-primary" type="submit">注 册</button>
         </form>
 
@@ -65,5 +75,6 @@
     </div>
 </div>
 
+<script src="{{ asset('js/auth.js') }}?v={{ filemtime(public_path('js/auth.js')) }}"></script>
 </body>
 </html>

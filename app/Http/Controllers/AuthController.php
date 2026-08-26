@@ -2,41 +2,73 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Organization;
 use App\Models\User;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
 /**
- * 注册 / 登录 / 登出（用户名+密码，开放注册，机构来自配置文件）
+ * 注册 / 登录 / 登出（用户名+密码，开放注册，机构来自 organizations 表）
  */
 class AuthController extends Controller
 {
-    /** 登录页（机构下拉列表来自 config/organizations.php） */
+    /** 登录页（机构下拉列表来自 organizations 表） */
     public function showLogin(): View
     {
         return view('login', [
-            'organizations' => config('organizations.list', []),
+            'organizations' => $this->organizationList(),
         ]);
     }
 
-    /** 注册页（机构下拉列表来自 config/organizations.php） */
+    /** 注册页（机构下拉列表来自 organizations 表） */
     public function showRegister(): View
     {
         return view('register', [
-            'organizations' => config('organizations.list', []),
+            'organizations' => $this->organizationList(),
         ]);
     }
 
-    /** 注册：校验用户名唯一 / 密码一致性 / 机构在配置内，创建后直接登录 */
+    /**
+     * 机构初始化状态查询（注册页选择机构后 AJAX 调用）
+     *
+     * @return JsonResponse {initialized: bool, default_code: string|null}
+     *                     未初始化机构返回系统临时生成的码（不落库，提交注册时才持久化）
+     */
+    public function organizationStatus(string $code): JsonResponse
+    {
+        $org = Organization::where('code', $code)->first();
+
+        if (! $org) {
+            return response()->json(['error' => '机构不存在'], 404);
+        }
+
+        return response()->json([
+            'initialized' => $org->isInitialized(),
+            'default_code' => $org->isInitialized() ? null : Organization::generateAuthCode(),
+        ]);
+    }
+
+    /**
+     * 注册：校验用户名唯一 / 密码一致性 / 机构认证码，创建后直接登录
+     *
+     * 认证码规则：
+     * - 机构未初始化（auth_code 为 null）→ 首次注册，以用户提交的码初始化该机构认证码
+     * - 机构已初始化 → 必须提交与库中一致的码（大小写不敏感，统一转大写比较）
+     * 事务 + 行锁：并发首次注册同一机构时，仅一人写入，另一人走比对分支
+     */
     public function register(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'username' => ['required', 'string', 'min:2', 'max:50', 'unique:users,username'],
             'password' => ['required', 'string', 'min:6', 'confirmed'],
             'organization_code' => ['required', 'string', Rule::in($this->orgCodes())],
+            'organization_auth_code' => ['required', 'string', 'regex:/^[A-Za-z0-9]{6}$/'],
         ], [
             'username.required' => '请输入用户名',
             'username.min' => '用户名至少 2 个字符',
@@ -47,14 +79,34 @@ class AuthController extends Controller
             'password.confirmed' => '两次输入的密码不一致',
             'organization_code.required' => '请选择所属机构',
             'organization_code.in' => '请选择有效的机构',
+            'organization_auth_code.required' => '请输入机构认证码',
+            'organization_auth_code.regex' => '机构认证码需为 6 位字母或数字',
         ]);
 
-        $user = User::create([
-            'name' => $validated['username'],
-            'username' => $validated['username'],
-            'password' => $validated['password'], // 模型 casts 会自动哈希
-            'organization_code' => $validated['organization_code'],
-        ]);
+        $submittedCode = strtoupper($validated['organization_auth_code']);
+
+        $user = DB::transaction(function () use ($validated, $submittedCode): User {
+            // 行锁防并发：两个用户同时首次注册同一机构时，仅一人能写入，另一人回退到比对分支
+            $org = Organization::where('code', $validated['organization_code'])->lockForUpdate()->first();
+
+            if (! $org) {
+                throw ValidationException::withMessages(['organization_code' => '请选择有效的机构']);
+            }
+
+            if (! $org->isInitialized()) {
+                // 首次注册该机构：以用户提交的码初始化认证码
+                $org->update(['auth_code' => $submittedCode]);
+            } elseif ($org->auth_code !== $submittedCode) {
+                throw ValidationException::withMessages(['organization_auth_code' => '机构认证码不正确']);
+            }
+
+            return User::create([
+                'name' => $validated['username'],
+                'username' => $validated['username'],
+                'password' => $validated['password'], // 模型 casts 会自动哈希
+                'organization_code' => $validated['organization_code'],
+            ]);
+        });
 
         Auth::login($user);
         $request->session()->regenerate();
@@ -108,9 +160,19 @@ class AuthController extends Controller
         return redirect('/login');
     }
 
-    /** 从配置提取机构 code 列表 */
+    /** 从 organizations 表提取机构 code 列表 */
     private function orgCodes(): array
     {
-        return array_column(config('organizations.list', []), 'code');
+        return Organization::query()->pluck('code')->all();
+    }
+
+    /** 机构下拉数据（code/name），与旧 config 结构保持一致，视图零改动 */
+    private function organizationList(): array
+    {
+        return Organization::query()
+            ->orderBy('id')
+            ->get(['code', 'name'])
+            ->map(fn (Organization $org) => ['code' => $org->code, 'name' => $org->name])
+            ->all();
     }
 }

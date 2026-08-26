@@ -61,7 +61,7 @@ class ExcelService
         return [
             'path' => $path,
             'filename' => $filename,
-            'url' => url('/api/excel/download/'.$filename),
+            'url' => '/api/excel/download/'.$filename,
         ];
     }
 

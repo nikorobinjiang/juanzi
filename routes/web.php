@@ -9,6 +9,8 @@ Route::middleware('guest')->group(function () {
     Route::post('/login', [AuthController::class, 'login']);
     Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
     Route::post('/register', [AuthController::class, 'register']);
+    // 机构初始化状态查询（注册页选择机构后 AJAX）
+    Route::get('/organizations/{code}/status', [AuthController::class, 'organizationStatus']);
 });
 
 // 已登录：业务页面与登出

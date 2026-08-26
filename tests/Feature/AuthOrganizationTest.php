@@ -5,13 +5,14 @@ namespace Tests\Feature;
 use App\Models\BookingRecord;
 use App\Models\GeneratedImage;
 use App\Models\Message;
+use App\Models\Organization;
 use App\Models\User;
 use App\Services\ExcelService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * 账号体系与机构级数据隔离测试
+ * 账号体系与机构级数据隔离测试（机构来自 organizations 表，注册需认证码）
  */
 class AuthOrganizationTest extends TestCase
 {
@@ -47,14 +48,15 @@ class AuthOrganizationTest extends TestCase
         ]);
     }
 
-    /** 注册成功：创建用户、自动登录、跳转约课页 */
+    /** 注册成功：首次注册写入机构认证码、创建用户、自动登录、跳转约课页 */
     public function test_register_creates_user_and_logs_in(): void
     {
         $response = $this->post('/register', [
             'username' => 'xiaoming',
             'password' => 'secret123',
             'password_confirmation' => 'secret123',
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'ABC123',
         ]);
 
         $response->assertRedirect('/appoints');
@@ -62,20 +64,27 @@ class AuthOrganizationTest extends TestCase
 
         $this->assertDatabaseHas('users', [
             'username' => 'xiaoming',
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
+        ]);
+
+        // 首次注册：认证码持久化到 organizations 表（统一大写）
+        $this->assertDatabaseHas('organizations', [
+            'code' => 'tennis_a',
+            'auth_code' => 'ABC123',
         ]);
     }
 
-    /** 注册校验：用户名重复 / 机构不在配置内 / 密码不一致 */
+    /** 注册校验：用户名重复 / 机构无效 / 密码不一致 / 认证码格式错误 */
     public function test_register_validates_input(): void
     {
-        $this->makeUser('xiaoming', 'swim');
+        $this->makeUser('xiaoming', 'tennis_a');
 
         $this->post('/register', [
             'username' => 'xiaoming',
             'password' => 'secret123',
             'password_confirmation' => 'secret123',
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'ABC123',
         ])->assertSessionHasErrors('username');
 
         $this->post('/register', [
@@ -83,23 +92,78 @@ class AuthOrganizationTest extends TestCase
             'password' => 'secret123',
             'password_confirmation' => 'secret123',
             'organization_code' => 'not-exists',
+            'organization_auth_code' => 'ABC123',
         ])->assertSessionHasErrors('organization_code');
 
         $this->post('/register', [
             'username' => 'xiaohong',
             'password' => 'secret123',
             'password_confirmation' => 'different',
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'ABC123',
         ])->assertSessionHasErrors('password');
+
+        // 认证码非 6 位字母数字
+        $this->post('/register', [
+            'username' => 'xiaohong',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'ab',
+        ])->assertSessionHasErrors('organization_auth_code');
     }
 
-    /** 登录（机构 + 用户名 + 密码）/ 登出 */
+    /** 缺少认证码被拒绝 */
+    public function test_register_requires_auth_code(): void
+    {
+        $this->post('/register', [
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'tennis_a',
+        ])->assertSessionHasErrors('organization_auth_code');
+    }
+
+    /** 已初始化机构：认证码错误被拒 */
+    public function test_register_rejects_wrong_auth_code(): void
+    {
+        Organization::where('code', 'tennis_a')->update(['auth_code' => 'ABC123']);
+
+        $this->post('/register', [
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'XYZ789',
+        ])->assertSessionHasErrors('organization_auth_code');
+        $this->assertGuest();
+
+        // 认证码未被篡改
+        $this->assertDatabaseHas('organizations', ['code' => 'tennis_a', 'auth_code' => 'ABC123']);
+    }
+
+    /** 认证码大小写不敏感 */
+    public function test_register_auth_code_case_insensitive(): void
+    {
+        Organization::where('code', 'tennis_a')->update(['auth_code' => 'ABC123']);
+
+        $this->post('/register', [
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'abc123',
+        ])->assertRedirect('/appoints');
+        $this->assertAuthenticated();
+    }
+
+    /** 登录（机构 + 用户名 + 密码）/ 登出（登录不需要认证码） */
     public function test_login_and_logout(): void
     {
-        $this->makeUser('xiaoming', 'swim');
+        $this->makeUser('xiaoming', 'tennis_a');
 
         $this->post('/login', [
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'secret123',
         ])->assertRedirect('/appoints');
@@ -109,12 +173,12 @@ class AuthOrganizationTest extends TestCase
         $this->assertGuest();
     }
 
-    /** 登录校验：机构不在配置内 / 所选机构与用户注册机构不一致 / 密码错误 */
+    /** 登录校验：机构无效 / 所选机构与用户注册机构不一致 / 密码错误 */
     public function test_login_validates_organization(): void
     {
-        $this->makeUser('xiaoming', 'swim');
+        $this->makeUser('xiaoming', 'tennis_a');
 
-        // 机构不在配置内
+        // 机构不在 organizations 表内
         $this->post('/login', [
             'organization_code' => 'not-exists',
             'username' => 'xiaoming',
@@ -124,7 +188,7 @@ class AuthOrganizationTest extends TestCase
 
         // 所选机构与用户注册时所属机构不一致（选错机构，防止进错工作区）
         $this->post('/login', [
-            'organization_code' => 'ball',
+            'organization_code' => 'tennis_b',
             'username' => 'xiaoming',
             'password' => 'secret123',
         ])->assertSessionHasErrors('username');
@@ -132,11 +196,35 @@ class AuthOrganizationTest extends TestCase
 
         // 机构正确但密码错误
         $this->post('/login', [
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'wrong-pass',
         ])->assertSessionHasErrors('username');
         $this->assertGuest();
+    }
+
+    /** 机构初始化状态接口：未初始化返回预生成码，已初始化返回 null，未知机构 404 */
+    public function test_organization_status_endpoint(): void
+    {
+        // 未初始化：default_code 为 6 位大写字母数字
+        $this->getJson('/organizations/tennis_a/status')
+            ->assertOk()
+            ->assertJsonPath('initialized', false)
+            ->assertJsonStructure(['initialized', 'default_code'])
+            ->assertJson(fn ($json) => $json->where('initialized', false));
+
+        $body = $this->getJson('/organizations/tennis_a/status')->json();
+        $this->assertMatchesRegularExpression('/^[A-Z0-9]{6}$/', (string) $body['default_code']);
+
+        // 已初始化：default_code 为 null
+        Organization::where('code', 'tennis_a')->update(['auth_code' => 'ABC123']);
+        $this->getJson('/organizations/tennis_a/status')
+            ->assertOk()
+            ->assertJsonPath('initialized', true)
+            ->assertJsonPath('default_code', null);
+
+        // 未知机构 404
+        $this->getJson('/organizations/not-exists/status')->assertNotFound();
     }
 
     /** 未登录访问页面跳登录页、访问 API 返回 401 */
@@ -150,10 +238,10 @@ class AuthOrganizationTest extends TestCase
     /** 登录成功后 API 应可访问（回归：api 组无 session 中间件导致 401 → 前端反复跳登录闪刷新） */
     public function test_logged_in_user_can_call_api(): void
     {
-        $this->makeUser('xiaoming', 'swim');
+        $this->makeUser('xiaoming', 'tennis_a');
 
         $this->post('/login', [
-            'organization_code' => 'swim',
+            'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'secret123',
         ])->assertRedirect('/appoints');
@@ -165,11 +253,11 @@ class AuthOrganizationTest extends TestCase
     /** 跨机构数据不可见：A 机构约课 B 机构通过 Eloquent 与 API 均查不到 */
     public function test_cross_organization_data_invisible(): void
     {
-        $userA = $this->makeUser('alice', 'swim');
-        $userB = $this->makeUser('bob', 'ball');
+        $userA = $this->makeUser('alice', 'tennis_a');
+        $userB = $this->makeUser('bob', 'tennis_b');
 
         $booking = $this->makeBooking($userA);
-        $this->assertSame('swim', $booking->organization_code);
+        $this->assertSame('tennis_a', $booking->organization_code);
 
         // A 机构自己能看到
         $this->actingAs($userA);
@@ -187,8 +275,8 @@ class AuthOrganizationTest extends TestCase
     /** 同机构多账号共享数据 */
     public function test_same_organization_shares_data(): void
     {
-        $userA = $this->makeUser('alice', 'swim');
-        $userC = $this->makeUser('carol', 'swim');
+        $userA = $this->makeUser('alice', 'tennis_a');
+        $userC = $this->makeUser('carol', 'tennis_a');
 
         $booking = $this->makeBooking($userA);
 
@@ -200,8 +288,8 @@ class AuthOrganizationTest extends TestCase
     /** 聊天记录与生成图片同样按机构隔离，且创建时自动填充机构 */
     public function test_messages_and_images_isolated_by_org(): void
     {
-        $userA = $this->makeUser('alice', 'swim');
-        $userB = $this->makeUser('bob', 'ball');
+        $userA = $this->makeUser('alice', 'tennis_a');
+        $userB = $this->makeUser('bob', 'tennis_b');
 
         $this->actingAs($userA);
         $message = Message::create(['role' => 'user', 'type' => 'text', 'content' => '你好']);
@@ -211,8 +299,8 @@ class AuthOrganizationTest extends TestCase
             'output_image' => 'generated/out.png',
         ]);
 
-        $this->assertSame('swim', $message->organization_code);
-        $this->assertSame('swim', $image->organization_code);
+        $this->assertSame('tennis_a', $message->organization_code);
+        $this->assertSame('tennis_a', $image->organization_code);
 
         // B 机构查不到
         $this->actingAs($userB);
@@ -225,14 +313,14 @@ class AuthOrganizationTest extends TestCase
     /** Excel 文件名带机构前缀；同机构可下载、跨机构下载被拒 */
     public function test_excel_filename_and_download_isolated_by_org(): void
     {
-        $userA = $this->makeUser('alice', 'swim');
-        $userB = $this->makeUser('bob', 'ball');
+        $userA = $this->makeUser('alice', 'tennis_a');
+        $userB = $this->makeUser('bob', 'tennis_b');
 
         $this->actingAs($userA);
         $result = app(ExcelService::class)->generate();
         $filename = $result['filename'];
 
-        $this->assertStringStartsWith('swim_', $filename);
+        $this->assertStringStartsWith('tennis_a_', $filename);
 
         // 同机构可下载
         $this->get('/api/excel/download/'.rawurlencode($filename))->assertOk();
@@ -240,5 +328,14 @@ class AuthOrganizationTest extends TestCase
         // 跨机构下载被拒（404）
         $this->actingAs($userB);
         $this->get('/api/excel/download/'.rawurlencode($filename))->assertNotFound();
+    }
+
+    /** 认证码生成：6 位、大写字母数字、不含易混淆字符 */
+    public function test_generate_auth_code_format(): void
+    {
+        foreach (range(1, 10) as $_) {
+            $code = Organization::generateAuthCode();
+            $this->assertMatchesRegularExpression('/^[A-Z2-9]{6}$/', $code);
+        }
     }
 }

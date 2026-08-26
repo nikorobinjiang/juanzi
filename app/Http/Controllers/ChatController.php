@@ -114,7 +114,7 @@ class ChatController extends Controller
                 'output_image' => $savedPath,
             ]);
 
-            $imageUrl = url('/storage/'.$savedPath);
+            $imageUrl = '/storage/'.$savedPath; // 相对路径：浏览器自动用当前访问域名，避免 APP_URL 配置错误导致图片加载不出
             $styleName = config("doubao.styles.{$style}.name", '图'.$style);
 
             // 存档助手消息
@@ -547,7 +547,7 @@ class ChatController extends Controller
             'role' => $m->role,
             'type' => $m->type,
             'content' => $m->content,
-            'image_url' => $m->image_path ? url('/storage/'.$m->image_path) : null,
+            'image_url' => $m->image_path ? '/storage/'.$m->image_path : null,
             'excel_url' => $m->extra['excel_url'] ?? null,
             'created_at' => $m->created_at?->format('H:i'),
         ];

@@ -58,7 +58,7 @@ class GenerateController extends Controller
                 'success' => true,
                 'reply' => '图片生成成功！已用【'.$styleName.'】风格生成并保存。',
                 'image' => [
-                    'url' => url('/storage/'.$savedPath),
+                    'url' => '/storage/'.$savedPath,
                     'style' => $styleName,
                 ],
             ]);
@@ -80,7 +80,7 @@ class GenerateController extends Controller
             ->map(fn (GeneratedImage $g) => [
                 'id' => $g->id,
                 'style' => config("doubao.styles.{$g->style_key}.name", '图'.$g->style_key),
-                'output_url' => url('/storage/'.$g->output_image),
+                'output_url' => '/storage/'.$g->output_image,
                 'created_at' => $g->created_at?->format('m-d H:i'),
             ]);
 

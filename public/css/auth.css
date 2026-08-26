@@ -122,6 +122,10 @@ select.form-input { cursor: pointer; }
 
 .field-error { color: var(--danger); font-size: 12px; margin-top: 4px; display: block; }
 
+.auth-code-tip { font-size: 12px; margin-top: 4px; color: var(--gray); min-height: 16px; }
+.auth-code-tip.is-ready { color: var(--success, #2e7d32); }
+.auth-code-tip.is-warn { color: var(--danger); }
+
 .auth-footer { text-align: center; margin-top: 18px; font-size: 13px; color: var(--gray); }
 .auth-footer a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .auth-footer a:active { opacity: .7; }

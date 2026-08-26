@@ -1,6 +1,6 @@
 @php
-    $orgName = collect(config('organizations.list'))
-        ->firstWhere('code', auth()->user()?->organization_code)['name']
+    // 机构名来自 organizations 表（原 config 已废弃）
+    $orgName = \App\Models\Organization::where('code', auth()->user()?->organization_code)->value('name')
         ?? auth()->user()?->organization_code ?? '';
 @endphp
 <!DOCTYPE html>
