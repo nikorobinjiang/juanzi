@@ -4,6 +4,11 @@ const state = {
     mode: 'chat',          // chat | excel
     pendingImage: null,    // { file, url }（约课截图识别）
     sending: false,
+    renderedIds: new Set(), // 已渲染消息 id（轮询去重）
+    pollTimer: null,        // 异步结果轮询定时器
+    pollAfterId: 0,         // 增量轮询起点（最大已渲染消息 id）
+    pollDeadline: 0,        // 轮询截止时间戳（10 分钟兜底）
+    asyncPending: false,    // 是否正在等待后台处理结果
 };
 
 const $ = (sel) => document.querySelector(sel);
@@ -151,6 +156,12 @@ function send() {
     state.sending = true;
     setSendingUI(true);
 
+    // 带图消息 = 截图约课 → 异步处理：立即返回占位气泡，后台完成后轮询通知
+    if (image) {
+        sendImageAsync(payload);
+        return;
+    }
+
     showTypingLoading();
 
     // 180 秒超时：豆包约课解析可能较慢（需附带约课JSON），防止请求挂起
@@ -186,8 +197,128 @@ function send() {
         });
 }
 
+/* ---------------- 异步截图约课（后台处理 + 轮询通知） ---------------- */
+function sendImageAsync(payload) {
+    apiFetch('/api/chat', { method: 'POST', body: payload })
+        .then((res) => res.json())
+        .then((data) => {
+            if (data.error) throw new Error(data.error);
+
+            // 占位气泡（仅本地显示，不入库）
+            appendMessage({
+                role: 'assistant',
+                type: 'text',
+                content: data.reply || '收到！图片已提交后台处理，完成后会通知你。',
+                local: true,
+            });
+
+            startPolling();
+        })
+        .catch((err) => {
+            appendMessage({ role: 'assistant', type: 'text', content: '出错了：' + err.message });
+        })
+        .finally(() => {
+            state.sending = false;
+            setSendingUI(false);
+        });
+}
+
+function startPolling() {
+    stopPolling();
+    state.pollAfterId = maxRenderedId();
+    state.pollDeadline = Date.now() + 10 * 60 * 1000; // 10 分钟兜底
+    state.asyncPending = true;
+
+    const tick = async () => {
+        if (!state.asyncPending) return;
+
+        // 超时兜底：停止轮询并提示
+        if (Date.now() > state.pollDeadline) {
+            stopPolling();
+            appendMessage({
+                role: 'assistant',
+                type: 'text',
+                content: '后台处理时间较长，请稍后刷新页面确认约课结果。',
+                local: true,
+            });
+            return;
+        }
+
+        try {
+            const res = await apiFetch('/api/messages?after_id=' + state.pollAfterId);
+            const data = await res.json();
+            const msgs = (data.messages || []).filter((m) => !state.renderedIds.has(m.id));
+
+            if (msgs.length) {
+                let hasAssistant = false;
+                msgs.forEach((m) => {
+                    appendMessage(payloadFromServer(m));
+                    state.pollAfterId = Math.max(state.pollAfterId, m.id);
+                    if (m.role === 'assistant') hasAssistant = true;
+                });
+                loadWeekly(); // 刷新约课表
+
+                // 收到新的助手回复（后台处理完成）→ 通知并停止轮询
+                if (hasAssistant) {
+                    stopPolling();
+                    notifyUser('约课处理完成');
+                    return;
+                }
+            }
+        } catch (e) {
+            // 网络异常静默，下一轮重试
+        }
+
+        state.pollTimer = setTimeout(tick, 5000);
+    };
+
+    state.pollTimer = setTimeout(tick, 5000);
+}
+
+function stopPolling() {
+    if (state.pollTimer) {
+        clearTimeout(state.pollTimer);
+        state.pollTimer = null;
+    }
+    state.asyncPending = false;
+}
+
+function maxRenderedId() {
+    let max = 0;
+    state.renderedIds.forEach((id) => { if (id > max) max = id; });
+    return max;
+}
+
+function payloadFromServer(m) {
+    return {
+        id: m.id,
+        role: m.role,
+        type: m.type,
+        content: m.content,
+        image_url: m.image_url,
+        excel: m.excel_url ? { url: m.excel_url, filename: m.excel_url.split('/').pop() } : null,
+        local: true,
+    };
+}
+
+function notifyUser(title) {
+    toast(title);
+    // 页面不可见时才用浏览器通知，可见时气泡已直接渲染
+    if (document.hidden && 'Notification' in window) {
+        if (Notification.permission === 'granted') {
+            new Notification(title, { body: '截图约课已完成，点击查看' });
+        } else if (Notification.permission === 'default') {
+            Notification.requestPermission().then((p) => {
+                if (p === 'granted') new Notification(title, { body: '截图约课已完成，点击查看' });
+            });
+        }
+    }
+}
+
 /* ---------------- 渲染消息 ---------------- */
 function appendMessage(msg) {
+    if (msg.id) state.renderedIds.add(msg.id);
+
     const div = document.createElement('div');
     div.className = `msg ${msg.role}`;
 
@@ -312,16 +443,7 @@ function loadHistory() {
             const welcome = $('#welcomeMsg');
             if (msgs.length) welcome?.remove();
 
-            msgs.forEach((m) => {
-                appendMessage({
-                    role: m.role,
-                    type: m.type,
-                    content: m.content,
-                    image_url: m.image_url,
-                    excel: m.excel_url ? { url: m.excel_url, filename: m.excel_url.split('/').pop() } : null,
-                    local: true,
-                });
-            });
+            msgs.forEach((m) => appendMessage(payloadFromServer(m)));
             scrollToBottom();
         })
         .catch(() => {});

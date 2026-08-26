@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class Message extends Model
 {
     protected $fillable = [
-        'role', 'type', 'content', 'image_path', 'extra', 'organization_code',
+        'role', 'type', 'content', 'image_path', 'extra', 'organization_code', 'user_id',
     ];
 
     protected $casts = [

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ProcessBookingImage;
 use App\Models\BookingRecord;
 use App\Models\GeneratedImage;
 use App\Models\Message;
@@ -56,8 +57,19 @@ class ChatController extends Controller
                 return response()->json($result);
             }
 
-            // 3. 约课 / 智能聊天（图片视为聊天截图）
-            $result = $this->handleBookingChat($userMessage, $hasImage);
+            // 3. 截图约课（带图消息）→ 异步：先存档用户消息并派发队列任务，立即返回
+            //    豆包识别与约课操作在后台完成，结果通过轮询推送到页面
+            if ($hasImage) {
+                ProcessBookingImage::dispatch($userMessage->id);
+
+                return response()->json([
+                    'reply' => '收到！图片已提交后台处理，完成后会通知你。',
+                    'async' => true,
+                ]);
+            }
+
+            // 4. 文字约课 / 智能聊天（保持同步）
+            $result = $this->handleBookingChat($userMessage, false);
 
             return response()->json($result);
         } catch (\Throwable $e) {
@@ -75,16 +87,29 @@ class ChatController extends Controller
     }
 
     /**
-     * 读取历史消息（页面刷新时加载）
+     * 读取历史消息
+     *
+     * - 不带 after_id：初次加载，返回最新 N 条（内部倒序取再反转为正序）
+     * - 带 after_id：增量查询，返回 id > after_id 的新消息（升序，供轮询使用）
      */
     public function history(Request $request): JsonResponse
     {
-        $messages = Message::orderBy('id', 'desc')
-            ->limit(min((int) $request->input('limit', 100), 500))
-            ->get()
-            ->reverse()
-            ->values()
-            ->map(fn (Message $m) => $this->messageToPayload($m));
+        $afterId = (int) $request->input('after_id', 0);
+
+        if ($afterId > 0) {
+            $messages = Message::where('id', '>', $afterId)
+                ->orderBy('id', 'asc')
+                ->limit(min((int) $request->input('limit', 100), 500))
+                ->get()
+                ->map(fn (Message $m) => $this->messageToPayload($m));
+        } else {
+            $messages = Message::orderBy('id', 'desc')
+                ->limit(min((int) $request->input('limit', 100), 500))
+                ->get()
+                ->reverse()
+                ->values()
+                ->map(fn (Message $m) => $this->messageToPayload($m));
+        }
 
         return response()->json(['messages' => $messages]);
     }
@@ -138,7 +163,10 @@ class ChatController extends Controller
      | 内部：约课 / 智能聊天
      | ----------------------------------------------------------------- */
 
-    private function handleBookingChat(Message $userMessage, bool $hasImage): array
+    /**
+     * 约课 / 智能聊天处理（public 供队列 Job ProcessBookingImage 复用）
+     */
+    public function handleBookingChat(Message $userMessage, bool $hasImage): array
     {
         $text = $userMessage->content;
 
@@ -497,6 +525,7 @@ class ChatController extends Controller
             'type' => $hasImage ? 'image' : 'text',
             'content' => $text,
             'image_path' => $imagePath,
+            'user_id' => auth('web')->id(),
         ]);
     }
 
