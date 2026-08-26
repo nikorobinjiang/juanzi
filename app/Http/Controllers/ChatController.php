@@ -142,17 +142,19 @@ class ChatController extends Controller
     {
         $text = $userMessage->content;
 
-        // 截图识别：先把图片转成可访问 URL 给豆包视觉模型
-        $imageUrl = null;
+        // 截图识别：传本地文件路径，DoubaoService 会转成 base64 data URI 给视觉模型。
+        // 不拼公网 URL —— 避免依赖 storage:link 软链 / APP_URL / 图片公网可达性（否则豆包服务端下载图片会 404）
+        $imageRef = null;
         if ($hasImage && $userMessage->image_path) {
-            $imageUrl = url('/storage/'.$userMessage->image_path);
+            $absolute = storage_path('app/public/'.$userMessage->image_path);
+            $imageRef = is_file($absolute) ? $absolute : null;
         }
 
         $bookingsJson = $this->booking->toJsonForAI();
 
         // 用豆包解析用户意图与结构化数据
         try {
-            $parsed = $this->doubao->parseBookingAction($text, $imageUrl, $bookingsJson);
+            $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson);
         } catch (\Throwable $e) {
             return ['reply' => '消息理解失败：'.$e->getMessage()];
         }

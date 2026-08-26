@@ -128,11 +128,11 @@ class DoubaoService
      * 解析用户消息 / 聊天截图，得到结构化约课动作
      *
      * @param  string  $userText
-     * @param  string|null  $imageUrl  聊天截图（可访问的 URL）
+     * @param  string|null  $imageRef  聊天截图：本地文件绝对路径或可访问 URL（本地路径会自动转 base64 data URI）
      * @param  string  $bookingsJson  当前约课数据 JSON，用于上下文
      * @return array  ['intent' => ..., 'data' => [...], 'reply' => ...]
      */
-    public function parseBookingAction(string $userText, ?string $imageUrl, string $bookingsJson): array
+    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson): array
     {
         $now = now()->format('Y-m-d H:i');
 
@@ -202,7 +202,10 @@ PROMPT;
             ['role' => 'system', 'content' => $system],
         ];
 
-        if ($imageUrl) {
+        if ($imageRef) {
+            // 本地路径 -> base64 data URI（不依赖公网 URL）；http(s) URL 原样透传
+            $imageUrl = $this->resolveImageRef($imageRef);
+
             $messages[] = [
                 'role' => 'user',
                 'content' => [
