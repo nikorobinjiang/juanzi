@@ -227,6 +227,31 @@ PROMPT;
         return $decoded;
     }
 
+    /**
+     * 轻量意图过滤：判断文字消息是否与约课相关
+     *
+     * 用普通文本模式（非 JSON）快速二分类，比 parseBookingAction 的 JSON 模式快得多。
+     * 仅当本地关键词未命中时调用；失败时保守放行（返回 true），避免误拦约课消息。
+     */
+    public function isBookingRelated(string $userText): bool
+    {
+        $system = <<<PROMPT
+你是羽毛球馆约课助手的消息过滤器。判断用户消息是否与约课相关——
+包括：约课、改课、取消、完成课程，查询课表、上课时间、剩余课时、教练/场地空闲，统计课时等。
+只回复一个单词：yes（相关）或 no（无关）。不要输出任何其他内容。
+PROMPT;
+
+        try {
+            $answer = strtolower(trim($this->chatText($system, '用户消息：'.$userText, 0.0)));
+
+            return str_contains($answer, 'yes');
+        } catch (\Throwable $e) {
+            Log::warning('轻量意图过滤失败，默认放行', ['error' => $e->getMessage()]);
+
+            return true; // 保守放行，避免误拦约课
+        }
+    }
+
     /* -----------------------------------------------------------------
      | 约课问答
      | ----------------------------------------------------------------- */

@@ -17,6 +17,16 @@ use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
 {
+    /** 本地约课强特征关键词：命中直接放行，无需再调轻量豆包确认 */
+    private array $bookingKeywords = [
+        '约课', '预约', '约一节', '约一次', '约个', '约了',
+        '上课', '课表', '课程', '下课', '上完', '补课', '请假', '课时', '几节课', '上课时间',
+        '教练', '老师', '学员', '学生',
+        '取消', '删掉', '退掉', '改课', '换课', '调整', '推迟', '提前',
+        '场地', '有空', '空闲', '还剩',
+        '打球', '羽毛球', '球场',
+    ];
+
     public function __construct(
         private readonly DoubaoService $doubao,
         private readonly BookingService $booking,
@@ -68,7 +78,21 @@ class ChatController extends Controller
                 ]);
             }
 
-            // 4. 文字约课 / 智能聊天（保持同步）
+            // 4. 文字消息：先本地关键词预筛，未命中再走轻量豆包二分类。
+            //    判定与约课无关则直接回复，不调用约课解析接口（避免闲聊消息白白等待 1 分钟+）
+            if (! $this->isBookingRelated($text) && ! $this->doubao->isBookingRelated($text)) {
+                $reply = '我是约课助手，只处理约课相关的事情（约课、改课、取消、查询课程/时间等）～';
+
+                Message::create([
+                    'role' => 'assistant',
+                    'type' => 'text',
+                    'content' => $reply,
+                ]);
+
+                return response()->json(['reply' => $reply]);
+            }
+
+            // 5. 文字约课 / 智能聊天（保持同步）
             $result = $this->handleBookingChat($userMessage, false);
 
             return response()->json($result);
@@ -162,6 +186,20 @@ class ChatController extends Controller
     /* -----------------------------------------------------------------
      | 内部：约课 / 智能聊天
      | ----------------------------------------------------------------- */
+
+    /**
+     * 本地关键词预筛：判断纯文字消息是否与约课相关（毫秒级，命中即放行）
+     */
+    private function isBookingRelated(string $text): bool
+    {
+        foreach ($this->bookingKeywords as $keyword) {
+            if (mb_strpos($text, $keyword) !== false) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /**
      * 约课 / 智能聊天处理（public 供队列 Job ProcessBookingImage 复用）

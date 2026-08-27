@@ -9,6 +9,7 @@ use App\Services\BookingService;
 use App\Services\DoubaoService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
@@ -62,8 +63,8 @@ class AsyncImageBookingTest extends TestCase
         );
     }
 
-    /** 文字消息保持同步：不派发队列任务 */
-    public function test_text_message_does_not_dispatch_job(): void
+    /** 文字闲聊（本地关键词未命中 + 轻量豆包判定无关）：直接回复指引文案，不调约课接口 */
+    public function test_text_chitchat_replies_directly_without_booking_api(): void
     {
         Queue::fake();
 
@@ -71,6 +72,29 @@ class AsyncImageBookingTest extends TestCase
         $this->actingAs($user);
 
         $this->mock(DoubaoService::class, function ($mock) {
+            $mock->shouldReceive('isBookingRelated')->once()->with('你好')->andReturn(false);
+            $mock->shouldReceive('parseBookingAction')->never();
+        });
+
+        $response = $this->postJson('/api/chat', ['message' => '你好']);
+
+        $reply = '我是约课助手，只处理约课相关的事情（约课、改课、取消、查询课程/时间等）～';
+        $response->assertOk()->assertJsonPath('reply', $reply);
+        $this->assertDatabaseHas('messages', ['role' => 'assistant', 'content' => $reply]);
+
+        ProcessBookingImage::assertNothingPushed();
+    }
+
+    /** 文字约课消息（本地关键词命中）：直接走约课解析，不调轻量豆包、不派发队列 */
+    public function test_text_booking_message_skips_lightweight_check(): void
+    {
+        Queue::fake();
+
+        $user = $this->makeUser('alice', 'tennis_a');
+        $this->actingAs($user);
+
+        $this->mock(DoubaoService::class, function ($mock) {
+            $mock->shouldReceive('isBookingRelated')->never();
             $mock->shouldReceive('parseBookingAction')->once()->andReturn([
                 'intent' => 'other',
                 'reply' => '好的，收到！',
@@ -78,11 +102,39 @@ class AsyncImageBookingTest extends TestCase
             ]);
         });
 
-        $response = $this->postJson('/api/chat', ['message' => '你好']);
+        $response = $this->postJson('/api/chat', ['message' => '帮我约课，明天上午10点']);
 
         $response->assertOk()->assertJsonPath('reply', '好的，收到！');
 
         ProcessBookingImage::assertNothingPushed();
+    }
+
+    /** 本地关键词未命中但轻量豆包判定相关：放行约课解析 */
+    public function test_text_related_via_lightweight_check_still_parses(): void
+    {
+        $user = $this->makeUser('alice', 'tennis_a');
+        $this->actingAs($user);
+
+        $this->mock(DoubaoService::class, function ($mock) {
+            $mock->shouldReceive('isBookingRelated')->once()->andReturn(true);
+            $mock->shouldReceive('parseBookingAction')->once()->andReturn([
+                'intent' => 'other',
+                'reply' => '好的，收到！',
+                'data' => [],
+            ]);
+        });
+
+        $response = $this->postJson('/api/chat', ['message' => '明天天气怎么样']);
+
+        $response->assertOk()->assertJsonPath('reply', '好的，收到！');
+    }
+
+    /** DoubaoService::isBookingRelated 调用失败时保守返回 true（放行），不误拦约课 */
+    public function test_lightweight_check_defaults_to_related_on_error(): void
+    {
+        Http::fake(['*' => Http::response('server error', 500)]);
+
+        $this->assertTrue(app(DoubaoService::class)->isBookingRelated('你好'));
     }
 
     /** Job 异常兜底：恢复机构上下文后存档 assistant 错误消息 */
