@@ -61,7 +61,7 @@
             return;
         }
         if (f.size > 10 * 1024 * 1024) {
-            alert('图片不能超过 10MB');
+            alert('图片超过 10M，请上传 10M 以内的文件（手机照片可先在相册里压缩）');
             return;
         }
         currentFile = f;
