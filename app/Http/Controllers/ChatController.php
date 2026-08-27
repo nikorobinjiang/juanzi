@@ -81,7 +81,7 @@ class ChatController extends Controller
             // 4. 文字消息：先本地关键词预筛，未命中再走轻量豆包二分类。
             //    判定与约课无关则直接回复，不调用约课解析接口（避免闲聊消息白白等待 1 分钟+）
             if (! $this->isBookingRelated($text) && ! $this->doubao->isBookingRelated($text)) {
-                $reply = '我是约课助手，只处理约课相关的事情（约课、改课、取消、查询课程/时间等）～';
+                $reply = '我是约课助手，只处理约课相关的事情哦（约课、改课、取消、查询课程/时间等）～';
 
                 Message::create([
                     'role' => 'assistant',

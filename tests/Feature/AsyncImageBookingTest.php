@@ -78,7 +78,7 @@ class AsyncImageBookingTest extends TestCase
 
         $response = $this->postJson('/api/chat', ['message' => '你好']);
 
-        $reply = '我是约课助手，只处理约课相关的事情（约课、改课、取消、查询课程/时间等）～';
+        $reply = '我是约课助手，只处理约课相关的事情哦（约课、改课、取消、查询课程/时间等）～';
         $response->assertOk()->assertJsonPath('reply', $reply);
         $this->assertDatabaseHas('messages', ['role' => 'assistant', 'content' => $reply]);
 
