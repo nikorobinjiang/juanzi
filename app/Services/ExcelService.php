@@ -138,14 +138,15 @@ class ExcelService
             $row++;
         });
 
-        // 星期列按同一天合并单元格（仅合并 B 列，其余列逐行保留）
-        $mergedWeekdayRanges = [];
+        // 日期栏、星期栏按同一天合并单元格（仅合并 A、B 列，其余列逐行保留）
+        $mergedRanges = [];
         foreach ($dateRows as $rows) {
             if (count($rows) > 1) {
                 $first = min($rows);
                 $last = max($rows);
+                $sheet->mergeCells('A'.$first.':A'.$last);
                 $sheet->mergeCells('B'.$first.':B'.$last);
-                $mergedWeekdayRanges[] = [$first, $last];
+                $mergedRanges[] = [$first, $last];
             }
         }
 
@@ -165,15 +166,17 @@ class ExcelService
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
 
-        // 合并区域内部清除上下边框，避免合并后的星期列残留内部横线
-        foreach ($mergedWeekdayRanges as [$first, $last]) {
+        // 合并区域内部清除上下边框，避免合并后的日期/星期列残留内部横线
+        foreach ($mergedRanges as [$first, $last]) {
             for ($r = $first + 1; $r < $last; $r++) {
-                $sheet->getStyle('B'.$r)->applyFromArray([
-                    'borders' => [
-                        'top' => ['borderStyle' => Border::BORDER_NONE],
-                        'bottom' => ['borderStyle' => Border::BORDER_NONE],
-                    ],
-                ]);
+                foreach (['A', 'B'] as $col) {
+                    $sheet->getStyle($col.$r)->applyFromArray([
+                        'borders' => [
+                            'top' => ['borderStyle' => Border::BORDER_NONE],
+                            'bottom' => ['borderStyle' => Border::BORDER_NONE],
+                        ],
+                    ]);
+                }
             }
         }
 
