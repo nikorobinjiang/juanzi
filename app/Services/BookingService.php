@@ -304,7 +304,7 @@ class BookingService
     {
         return $this->scopedQuery($student, $coach)
             ->where('status', BookingRecord::STATUS_BOOKED)
-            ->where('start_at', '>=', Carbon::now())
+            ->where('start_at', '>=', Carbon::now('Asia/Shanghai'))
             ->orderBy('start_at')
             ->first();
     }

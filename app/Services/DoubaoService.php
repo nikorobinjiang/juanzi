@@ -134,7 +134,7 @@ class DoubaoService
      */
     public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson): array
     {
-        $now = now()->format('Y-m-d H:i');
+        $now = now('Asia/Shanghai')->format('Y-m-d H:i');
 
         $system = <<<PROMPT
 你是羽毛球馆约课管理助手，负责把用户的自然语言(或聊天截图中的文字)解析成结构化动作。

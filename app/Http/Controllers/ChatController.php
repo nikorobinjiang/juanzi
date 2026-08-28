@@ -510,7 +510,7 @@ class ChatController extends Controller
         try {
             $from = Carbon::parse((string) ($data['date_from'] ?? ''))->startOfDay();
         } catch (\Throwable $e) {
-            $from = Carbon::today();
+            $from = Carbon::today('Asia/Shanghai');
         }
 
         try {
@@ -537,7 +537,7 @@ class ChatController extends Controller
 
         foreach ($days as $day) {
             $date = Carbon::parse($day['date']);
-            $label = $date->isToday() ? '今天' : $date->format('n月j日');
+            $label = $date->isToday('Asia/Shanghai') ? '今天' : $date->format('n月j日');
 
             $lines[] = $day['slots']
                 ? $label.'空闲时段：'.implode('、', $day['slots'])
