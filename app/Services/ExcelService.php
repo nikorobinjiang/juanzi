@@ -109,7 +109,8 @@ class ExcelService
             BookingRecord::STATUS_CANCELLED => '868E96', // 取消：灰色字体
         ];
 
-        $items->each(function (BookingRecord $b) use ($sheet, &$row, $statusFontColors) {
+        $dateRows = []; // 记录每个日期对应的行号，用于星期列合并
+        $items->each(function (BookingRecord $b) use ($sheet, &$row, &$dateRows, $statusFontColors) {
             $sheet->setCellValue('A'.$row, $b->start_at->format('Y-m-d'));
             $sheet->setCellValue('B'.$row, self::WEEKDAY_CN[$b->start_at->dayOfWeek] ?? '');
             $sheet->setCellValue('C'.$row, $b->start_at->format('H:i').'-'.$b->end_at->format('H:i'));
@@ -133,8 +134,20 @@ class ExcelService
             // 行距：数据行统一加高，阅读更舒适
             $sheet->getRowDimension($row)->setRowHeight(28);
 
+            $dateRows[$b->start_at->format('Y-m-d')][] = $row;
             $row++;
         });
+
+        // 星期列按同一天合并单元格（仅合并 B 列，其余列逐行保留）
+        $mergedWeekdayRanges = [];
+        foreach ($dateRows as $rows) {
+            if (count($rows) > 1) {
+                $first = min($rows);
+                $last = max($rows);
+                $sheet->mergeCells('B'.$first.':B'.$last);
+                $mergedWeekdayRanges[] = [$first, $last];
+            }
+        }
 
         $lastRow = max($row - 1, 3);
 
@@ -151,6 +164,18 @@ class ExcelService
             ],
             'alignment' => ['horizontal' => Alignment::HORIZONTAL_CENTER, 'vertical' => Alignment::VERTICAL_CENTER],
         ]);
+
+        // 合并区域内部清除上下边框，避免合并后的星期列残留内部横线
+        foreach ($mergedWeekdayRanges as [$first, $last]) {
+            for ($r = $first + 1; $r < $last; $r++) {
+                $sheet->getStyle('B'.$r)->applyFromArray([
+                    'borders' => [
+                        'top' => ['borderStyle' => Border::BORDER_NONE],
+                        'bottom' => ['borderStyle' => Border::BORDER_NONE],
+                    ],
+                ]);
+            }
+        }
 
         // 备注列左对齐
         $sheet->getStyle('H3:H'.$lastRow)->getAlignment()

@@ -442,8 +442,7 @@ class BookingService
             ->values()
             ->map(function ($week) {
                 $week['items'] = $week['items']
-                    ->sortBy(fn (BookingRecord $b) => $b->start_at->format('Y-m-d H:i'))
-                    ->sortBy(fn (BookingRecord $b) => array_search($b->venue, $this->venues));
+                    ->sortBy(fn (BookingRecord $b) => $b->start_at->format('Y-m-d H:i'));
                 return $week;
             })
             ->values();
