@@ -8,7 +8,7 @@ return new class extends Migration
     /** 新增机构清单（code => name，auth_code 初始为 null，首个注册用户负责初始化） */
     private const NEW_ORGS = [
         'alan_tennis' => '杭州阿蓝网球',
-        'ranle_fitness' => '杭州燃乐体育健身',
+        'ranle_fitness' => '杭州皇冠游泳健身',
     ];
 
     /** 与 tennis_b 关联的业务表（任一表有数据则禁止删除机构，防止数据孤立） */
@@ -20,7 +20,7 @@ return new class extends Migration
     ];
 
     /**
-     * 新增杭州阿蓝网球 / 杭州燃乐体育健身，棋院A改名为杭州奕林棋院（code 不变），
+     * 新增杭州阿蓝网球 / 杭州皇冠游泳健身，棋院A改名为杭州奕林棋院（code 不变），
      * 并安全删除网球馆B（先检查关联数据，有数据则中止迁移）。
      */
     public function up(): void
