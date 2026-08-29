@@ -65,7 +65,9 @@ class AuthController extends Controller
     public function register(Request $request): RedirectResponse
     {
         $validated = $request->validate([
-            'username' => ['required', 'string', 'min:2', 'max:50', 'unique:users,username'],
+            // 用户名在所选机构内唯一，不同机构允许重复
+            'username' => ['required', 'string', 'min:2', 'max:50',
+                Rule::unique('users', 'username')->where('organization_code', $request->input('organization_code'))],
             'password' => ['required', 'string', 'min:6', 'confirmed'],
             'organization_code' => ['required', 'string', Rule::in($this->orgCodes())],
             'organization_auth_code' => ['required', 'string', 'regex:/^[A-Za-z0-9]{6}$/'],
@@ -114,7 +116,7 @@ class AuthController extends Controller
         return redirect('/appoints');
     }
 
-    /** 登录：机构 + 用户名 + 密码（用户名全局唯一，机构须与注册时一致） */
+    /** 登录：机构 + 用户名 + 密码（用户名在机构内唯一，按机构+用户名精确匹配，跨机构同名互不干扰） */
     public function login(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -128,15 +130,18 @@ class AuthController extends Controller
             'password.required' => '请输入密码',
         ]);
 
-        // 用户名全局唯一：先按用户名查用户，校验所选机构与注册时所属机构一致，防止选错机构进错工作区
-        $user = User::where('username', $validated['username'])->first();
-        if (! $user || $user->organization_code !== $validated['organization_code']) {
+        // 按机构+用户名定位用户（用户名机构内唯一），跨机构同名各自归属各自机构
+        $user = User::where('username', $validated['username'])
+            ->where('organization_code', $validated['organization_code'])
+            ->first();
+        if (! $user) {
             return back()
                 ->withErrors(['username' => '用户名、密码或机构选择不正确'])
                 ->onlyInput('username', 'organization_code');
         }
 
         if (Auth::attempt([
+            'organization_code' => $validated['organization_code'],
             'username' => $validated['username'],
             'password' => $validated['password'],
         ], (bool) $request->boolean('remember'))) {

@@ -19,12 +19,12 @@ class AuthOrganizationTest extends TestCase
     use RefreshDatabase;
 
     /** 造一个指定机构的用户（密码明文，模型 hashed cast 自动哈希） */
-    private function makeUser(string $username, string $org): User
+    private function makeUser(string $username, string $org, string $password = 'secret123'): User
     {
         return User::create([
             'name' => $username,
             'username' => $username,
-            'password' => 'secret123',
+            'password' => $password,
             'organization_code' => $org,
         ]);
     }
@@ -188,7 +188,7 @@ class AuthOrganizationTest extends TestCase
 
         // 所选机构与用户注册时所属机构不一致（选错机构，防止进错工作区）
         $this->post('/login', [
-            'organization_code' => 'tennis_b',
+            'organization_code' => 'swim_a',
             'username' => 'xiaoming',
             'password' => 'secret123',
         ])->assertSessionHasErrors('username');
@@ -199,6 +199,81 @@ class AuthOrganizationTest extends TestCase
             'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'wrong-pass',
+        ])->assertSessionHasErrors('username');
+        $this->assertGuest();
+    }
+
+    /** 用户名机构内唯一：不同机构允许同名注册，各自落库且机构归属正确 */
+    public function test_same_username_allowed_across_organizations(): void
+    {
+        $this->makeUser('xiaoming', 'tennis_a');
+
+        $this->post('/register', [
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'swim_a',
+            'organization_auth_code' => 'ABC123',
+        ])->assertRedirect('/appoints');
+        $this->assertAuthenticated();
+
+        // 两个机构各有同名用户，均落库
+        $this->assertDatabaseHas('users', [
+            'username' => 'xiaoming',
+            'organization_code' => 'tennis_a',
+        ]);
+        $this->assertDatabaseHas('users', [
+            'username' => 'xiaoming',
+            'organization_code' => 'swim_a',
+        ]);
+    }
+
+    /** 用户名机构内唯一：同一机构内同名注册仍被拒绝 */
+    public function test_same_username_rejected_within_same_organization(): void
+    {
+        $this->makeUser('xiaoming', 'tennis_a');
+
+        $this->post('/register', [
+            'username' => 'xiaoming',
+            'password' => 'secret123',
+            'password_confirmation' => 'secret123',
+            'organization_code' => 'tennis_a',
+            'organization_auth_code' => 'ABC123',
+        ])->assertSessionHasErrors('username');
+        $this->assertGuest();
+    }
+
+    /** 跨机构同名登录隔离：各自机构+各自密码登录成功，用错机构或密码均被拒 */
+    public function test_same_username_login_isolated_across_organizations(): void
+    {
+        // 两个机构各有 xiaoming，密码不同
+        $this->makeUser('xiaoming', 'tennis_a', 'pass_a_123');
+        $this->makeUser('xiaoming', 'swim_a', 'pass_b_123');
+
+        // 各自机构 + 各自密码登录成功
+        $this->post('/login', [
+            'organization_code' => 'tennis_a',
+            'username' => 'xiaoming',
+            'password' => 'pass_a_123',
+        ])->assertRedirect('/appoints');
+        $this->assertAuthenticated();
+
+        $this->post('/logout')->assertRedirect('/login');
+
+        $this->post('/login', [
+            'organization_code' => 'swim_a',
+            'username' => 'xiaoming',
+            'password' => 'pass_b_123',
+        ])->assertRedirect('/appoints');
+        $this->assertAuthenticated();
+
+        $this->post('/logout')->assertRedirect('/login');
+
+        // 用 swim_a 机构 + tennis_a 的密码 → 被拒（跨机构密码互不通用）
+        $this->post('/login', [
+            'organization_code' => 'swim_a',
+            'username' => 'xiaoming',
+            'password' => 'pass_a_123',
         ])->assertSessionHasErrors('username');
         $this->assertGuest();
     }

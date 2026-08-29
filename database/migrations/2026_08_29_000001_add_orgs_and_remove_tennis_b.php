@@ -8,7 +8,6 @@ return new class extends Migration
     /** 新增机构清单（code => name，auth_code 初始为 null，首个注册用户负责初始化） */
     private const NEW_ORGS = [
         'alan_tennis' => '杭州阿蓝网球',
-        'yilin_qiyuan' => '杭州奕林棋院',
         'ranle_fitness' => '杭州燃乐体育健身',
     ];
 
@@ -21,7 +20,7 @@ return new class extends Migration
     ];
 
     /**
-     * 新增杭州阿蓝网球 / 杭州奕林棋院 / 杭州燃乐体育健身，
+     * 新增杭州阿蓝网球 / 杭州燃乐体育健身，棋院A改名为杭州奕林棋院（code 不变），
      * 并安全删除网球馆B（先检查关联数据，有数据则中止迁移）。
      */
     public function up(): void
@@ -38,6 +37,10 @@ return new class extends Migration
                     'updated_at' => $now,
                 ]);
             }
+
+            // 棋院A改名为杭州奕林棋院（内部 code 保持 qi_yuan_a 不变，业务数据自然归属）
+            DB::table('organizations')->where('code', 'qi_yuan_a')
+                ->update(['name' => '杭州奕林棋院', 'updated_at' => $now]);
 
             // 删除 tennis_b 前的安全检查：任一张业务表有数据则中止迁移
             $hasData = false;
@@ -62,7 +65,7 @@ return new class extends Migration
     }
 
     /**
-     * 反向恢复：删除三个新机构，恢复网球馆B。
+     * 反向恢复：删除两个新机构，恢复网球馆B，棋院A显示名恢复为棋院A。
      * 注：tennis_b 原认证码无法从迁移中恢复，如需恢复请手动补 auth_code。
      */
     public function down(): void
@@ -76,6 +79,9 @@ return new class extends Migration
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
+
+            DB::table('organizations')->where('code', 'qi_yuan_a')
+                ->update(['name' => '棋院A', 'updated_at' => $now]);
 
             DB::table('organizations')->whereIn('code', array_keys(self::NEW_ORGS))->delete();
         });
