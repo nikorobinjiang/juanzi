@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Organization;
 use App\Services\ExcelService;
 use Illuminate\Http\JsonResponse;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
@@ -36,9 +37,18 @@ class ExcelController extends Controller
         $filename = basename($filename);
         $path = storage_path('app/excel/'.$filename);
 
-        // 机构隔离：文件名必须以当前机构 code 开头，防止跨机构下载
+        // 机构隔离：文件名必须以当前机构的 name 或 code 前缀开头，防止跨机构下载
+        // 新文件为 name 前缀；旧文件为 code 前缀，两者均兼容
         $orgCode = auth('web')->user()?->organization_code ?? '';
-        if ($orgCode === '' || ! str_starts_with($filename, $orgCode.'_')) {
+        $orgName = $orgCode === '' ? '' : (Organization::where('code', $orgCode)->value('name') ?? '');
+        $safeName = $orgName === '' ? '' : preg_replace('/[\/\\\\:*?"<>|]/', '_', $orgName);
+
+        $prefixes = array_values(array_filter([
+            $safeName !== '' ? $safeName.'_约课表_' : null,
+            $orgCode !== '' ? $orgCode.'_约课表_' : null,
+        ]));
+
+        if ($orgCode === '' || $prefixes === [] || ! array_filter($prefixes, fn ($p) => str_starts_with($filename, $p))) {
             abort(404, '文件不存在或已过期，请重新生成');
         }
 

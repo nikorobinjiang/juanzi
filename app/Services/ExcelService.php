@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BookingRecord;
+use App\Models\Organization;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -51,8 +52,11 @@ class ExcelService
         }
 
         // 文件名带机构前缀，下载时按前缀校验归属，防止跨机构访问
+        // 前缀使用机构显示名，查不到时回退 code
         $orgCode = auth('web')->user()?->organization_code ?? 'guest';
-        $filename = $orgCode.'_约课表_'.now()->format('Ymd_His').'.xlsx';
+        $orgName = Organization::where('code', $orgCode)->value('name') ?? $orgCode;
+        $safeName = preg_replace('/[\/\\\\:*?"<>|]/', '_', $orgName);
+        $filename = $safeName.'_约课表_'.now()->format('Ymd_His').'.xlsx';
         $path = $dir.DIRECTORY_SEPARATOR.$filename;
 
         $writer = new Xlsx($spreadsheet);
