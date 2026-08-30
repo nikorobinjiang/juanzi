@@ -590,21 +590,7 @@ class ChatController extends Controller
      */
     private function bookingSummary(): array
     {
-        return $this->booking->weekly()
-            ->map(fn (array $week) => [
-                'label' => $week['label'],
-                'count' => $week['items']->count(),
-                'items' => $week['items']->map(fn ($b) => [
-                    'id' => $b->id,
-                    'student_name' => $b->student_name,
-                    'coach_name' => $b->coach_name,
-                    'start_at' => $b->start_at->format('Y-m-d H:i'),
-                    'venue' => $b->venue,
-                    'status' => $b->status,
-                    'remark' => $b->remark,
-                ])->values(),
-            ])->values()
-            ->toArray();
+        return $this->booking->weeklyForApi()->toArray();
     }
 
     private function messageToPayload(Message $m): array

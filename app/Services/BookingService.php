@@ -449,6 +449,29 @@ class BookingService
     }
 
     /**
+     * 按"周"分组，返回前端展示所需的结构（含 count、已格式化时间）
+     */
+    public function weeklyForApi(): Collection
+    {
+        return $this->weekly()->map(function (array $week) {
+            return [
+                'week_start' => $week['week_start'],
+                'week_end' => $week['week_end'],
+                'label' => $week['label'],
+                'count' => $week['items']->count(),
+                'items' => $week['items']->map(fn (BookingRecord $b) => [
+                    'id' => $b->id,
+                    'student_name' => $b->student_name,
+                    'coach_name' => $b->coach_name,
+                    'start_at' => $b->start_at->format('m-d H:i'),
+                    'venue' => $b->venue,
+                    'status' => $b->status,
+                ])->values(),
+            ];
+        })->values();
+    }
+
+    /**
      * 输出给豆包的约课 JSON（仅未取消记录）
      */
     public function toJsonForAI(): string

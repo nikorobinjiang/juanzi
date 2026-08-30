@@ -20,7 +20,7 @@ class BookingController extends Controller
      */
     public function index(): JsonResponse
     {
-        return response()->json(['weeks' => $this->booking->weekly()]);
+        return response()->json(['weeks' => $this->booking->weeklyForApi()]);
     }
 
     /**
