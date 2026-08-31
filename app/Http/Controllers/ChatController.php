@@ -222,7 +222,17 @@ class ChatController extends Controller
         try {
             $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson);
         } catch (\Throwable $e) {
-            return ['reply' => '消息理解失败：'.$e->getMessage()];
+            Log::error('约课解析失败', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+
+            // 失败也要存档回复，否则异步截图约课场景下用户侧看不到任何提示（静默失败）
+            $reply = '消息理解失败：'.$e->getMessage();
+            Message::create([
+                'role' => 'assistant',
+                'type' => 'text',
+                'content' => $reply,
+            ]);
+
+            return ['reply' => $reply];
         }
 
         $intent = $parsed['intent'] ?? 'other';

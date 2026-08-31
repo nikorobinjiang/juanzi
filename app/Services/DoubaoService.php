@@ -54,31 +54,53 @@ class DoubaoService
             $payload['response_format'] = ['type' => 'json_object'];
         }
 
-        $response = Http::withToken($this->apiKey)
-            ->connectTimeout(10)
-            ->timeout($this->timeout)
-            ->post($this->baseUrl.'/chat/completions', $payload);
+        // 429 限流退避重试：火山方舟对突发流量有保护（RequestBurstTooFast），短暂等待后重试可大幅降低失败率
+        $maxAttempts = 3;
 
-        if ($response->failed()) {
+        for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+            try {
+                $response = Http::withToken($this->apiKey)
+                    ->connectTimeout(10)
+                    ->timeout($this->timeout)
+                    ->post($this->baseUrl.'/chat/completions', $payload);
+            } catch (\Throwable $e) {
+                // 网络层异常（连接超时等）：与限流无关，直接抛出
+                throw new RuntimeException('豆包接口调用失败：'.$e->getMessage());
+            }
+
+            if (! $response->failed()) {
+                $data = $response->json();
+
+                return [
+                    'text' => $data['choices'][0]['message']['content'] ?? '',
+                    'raw' => $data,
+                ];
+            }
+
             $body = (string) $response->body();
-            Log::error('豆包对话接口失败', ['status' => $response->status(), 'body' => $body]);
+            $status = $response->status();
+
+            // 429 限流：退避后重试；最后一次仍 429 则落失败逻辑
+            if ($status === 429 && $attempt < $maxAttempts) {
+                $sleep = $attempt * 5; // 5 秒 / 10 秒
+                Log::warning('豆包接口限流(429)，'.$sleep.'秒后第'.($attempt + 1).'次重试');
+                sleep($sleep);
+                continue;
+            }
+
+            Log::error('豆包对话接口失败', ['status' => $status, 'body' => $body]);
 
             $hint = '';
-            if ($response->status() === 404 && str_contains($body, 'InvalidEndpointOrModel')) {
+            if ($status === 404 && str_contains($body, 'InvalidEndpointOrModel')) {
                 $hint = '（模型不存在或无权限：请在火山方舟控制台【模型广场】创建"推理接入点"，把得到的 ep-xxxxx 填到 .env 的 DOUBAO_CHAT_MODEL，或用当前有效模型ID）';
-            } elseif ($response->status() === 401) {
+            } elseif ($status === 401) {
                 $hint = '（API Key 无效：请检查 .env 的 DOUBAO_API_KEY）';
             }
 
-            throw new RuntimeException('豆包接口调用失败：'.$response->status().' '.mb_substr($body, 0, 300).$hint);
+            throw new RuntimeException('豆包接口调用失败：'.$status.' '.mb_substr($body, 0, 300).$hint);
         }
 
-        $data = $response->json();
-
-        return [
-            'text' => $data['choices'][0]['message']['content'] ?? '',
-            'raw' => $data,
-        ];
+        throw new RuntimeException('豆包接口调用失败：多次尝试均被限流(429)');
     }
 
     /**
