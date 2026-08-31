@@ -23,6 +23,9 @@ class ProcessBookingImage implements ShouldQueue
     /** 豆包失败重试无意义，落 failed_jobs 排查即可 */
     public int $tries = 1;
 
+    /** 豆包识别截图最长 90 秒 + 约课操作余量，须大于 worker 默认 60 秒，避免超时被杀 */
+    public int $timeout = 240;
+
     public function __construct(public readonly int $messageId) {}
 
     public function handle(): void
