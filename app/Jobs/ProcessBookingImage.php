@@ -53,7 +53,7 @@ class ProcessBookingImage implements ShouldQueue
             Message::create([
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => '出错了：'.$e->getMessage(),
+                'content' => $e->getMessage(),
             ]);
         } finally {
             // 防止 worker 常驻进程残留登录态，污染后续任务

@@ -99,14 +99,14 @@ class ChatController extends Controller
         } catch (\Throwable $e) {
             Log::error('聊天处理异常', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 
-            // 异常也要把回复存档
+            // 异常也要把回复存档；豆包侧异常已包装成友好提示，其他异常直接展示原始消息
             Message::create([
                 'role' => 'assistant',
                 'type' => 'text',
-                'content' => '出错了：'.$e->getMessage(),
+                'content' => $e->getMessage(),
             ]);
 
-            return response()->json(['reply' => '出错了：'.$e->getMessage()], 200);
+            return response()->json(['reply' => $e->getMessage()], 200);
         }
     }
 
@@ -224,7 +224,8 @@ class ChatController extends Controller
         } catch (\Throwable $e) {
             Log::error('约课解析失败', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 
-            $reply = '消息理解失败：'.$e->getMessage();
+            // 豆包侧异常已包装成用户友好提示，此处直接保存，不再拼接技术前缀
+            $reply = $e->getMessage();
 
             // 异步截图约课：失败也要存档回复，否则前端轮询收不到任何提示（静默失败）
             // 同步文字消息由前端直接渲染返回值，无需重复入库

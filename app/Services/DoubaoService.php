@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -54,23 +55,29 @@ class DoubaoService
             $payload['response_format'] = ['type' => 'json_object'];
         }
 
-        $response = Http::withToken($this->apiKey)
-            ->connectTimeout(10)
-            ->timeout($this->timeout)
-            ->post($this->baseUrl.'/chat/completions', $payload);
+        try {
+            $response = Http::withToken($this->apiKey)
+                ->connectTimeout(10)
+                ->timeout($this->timeout)
+                ->post($this->baseUrl.'/chat/completions', $payload);
+        } catch (ConnectionException $e) {
+            Log::error('豆包接口连接/超时失败', ['error' => $e->getMessage()]);
+            throw new RuntimeException('豆包接口响应超时，请稍后重试');
+        }
 
         if ($response->failed()) {
             $body = (string) $response->body();
-            Log::error('豆包对话接口失败', ['status' => $response->status(), 'body' => $body]);
+            $status = $response->status();
+            Log::error('豆包对话接口失败', ['status' => $status, 'body' => $body]);
 
-            $hint = '';
-            if ($response->status() === 404 && str_contains($body, 'InvalidEndpointOrModel')) {
-                $hint = '（模型不存在或无权限：请在火山方舟控制台【模型广场】创建"推理接入点"，把得到的 ep-xxxxx 填到 .env 的 DOUBAO_CHAT_MODEL，或用当前有效模型ID）';
-            } elseif ($response->status() === 401) {
-                $hint = '（API Key 无效：请检查 .env 的 DOUBAO_API_KEY）';
-            }
+            $hint = match (true) {
+                $status === 429 => '豆包接口当前繁忙，请稍后重试',
+                $status === 404 && str_contains($body, 'InvalidEndpointOrModel') => '模型不存在或无权限：请在火山方舟控制台【模型广场】创建"推理接入点"，把得到的 ep-xxxxx 填到 .env 的 DOUBAO_CHAT_MODEL，或用当前有效模型ID',
+                $status === 401 => 'API Key 无效：请检查 .env 的 DOUBAO_API_KEY',
+                default => '豆包接口调用失败，请稍后重试',
+            };
 
-            throw new RuntimeException('豆包接口调用失败：'.$response->status().' '.mb_substr($body, 0, 300).$hint);
+            throw new RuntimeException($hint);
         }
 
         $data = $response->json();
