@@ -224,13 +224,17 @@ class ChatController extends Controller
         } catch (\Throwable $e) {
             Log::error('约课解析失败', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 
-            // 失败也要存档回复，否则异步截图约课场景下用户侧看不到任何提示（静默失败）
             $reply = '消息理解失败：'.$e->getMessage();
-            Message::create([
-                'role' => 'assistant',
-                'type' => 'text',
-                'content' => $reply,
-            ]);
+
+            // 异步截图约课：失败也要存档回复，否则前端轮询收不到任何提示（静默失败）
+            // 同步文字消息由前端直接渲染返回值，无需重复入库
+            if ($hasImage) {
+                Message::create([
+                    'role' => 'assistant',
+                    'type' => 'text',
+                    'content' => $reply,
+                ]);
+            }
 
             return ['reply' => $reply];
         }
