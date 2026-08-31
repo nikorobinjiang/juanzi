@@ -139,16 +139,18 @@ function send() {
     if (text) payload.append('message', text);
     if (image) payload.append('image', image.file);
 
-    // 用户气泡（本地立即显示）
-    const userMsg = {
-        role: 'user',
-        type: image ? 'image' : 'text',
-        content: text,
-        image_url: image?.url || null,
-        local: true,
-    };
-    appendMessage(userMsg);
-    scrollToBottom();
+    // 用户气泡（本地立即显示）。图片消息等后端确认上传成功后再渲染，
+    // 避免本地 blob URL 被 clearPreview 释放后聊天记录里图片空白。
+    if (!image) {
+        const userMsg = {
+            role: 'user',
+            type: 'text',
+            content: text,
+            local: true,
+        };
+        appendMessage(userMsg);
+        scrollToBottom();
+    }
 
     elInput.value = '';
     autoResize(elInput);
@@ -204,7 +206,13 @@ function sendImageAsync(payload) {
         .then((data) => {
             if (data.error) throw new Error(data.error);
 
-            // 占位气泡（仅本地显示，不入库）
+            // 先渲染已上传成功的用户图片消息（使用后端返回的正式 URL）
+            if (data.user_message) {
+                appendMessage(payloadFromServer(data.user_message));
+                scrollToBottom();
+            }
+
+            // 再显示助手占位提示
             appendMessage({
                 role: 'assistant',
                 type: 'text',

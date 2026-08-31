@@ -75,6 +75,7 @@ class ChatController extends Controller
                 return response()->json([
                     'reply' => '收到！图片已提交后台处理，完成后会通知你。',
                     'async' => true,
+                    'user_message' => $this->messageToPayload($userMessage),
                 ]);
             }
 
