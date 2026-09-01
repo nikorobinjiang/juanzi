@@ -77,7 +77,7 @@ class ExcelService
         $sheet->setTitle($this->sheetTitle($week['label'], $index));
 
         // 标题行
-        $sheet->setCellValue('A1', '好运爆棚 · 约课表（'.$week['label'].'）');
+        $sheet->setCellValue('A1', '约刻 · 约课表（'.$week['label'].'）');
         $sheet->mergeCells('A1:H1');
         $sheet->getStyle('A1')->applyFromArray([
             'font' => ['bold' => true, 'size' => 14, 'color' => ['rgb' => '1A1A2E']],

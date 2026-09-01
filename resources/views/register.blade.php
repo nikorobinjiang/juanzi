@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#4C6EF5">
-    <title>注册 · 好运爆棚</title>
+    <title>注册 · 约刻</title>
     <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <link rel="stylesheet" href="{{ asset('css/auth.css') }}?v={{ filemtime(public_path('css/auth.css')) }}">
     <script>window.CSRF_TOKEN = @json(csrf_token());</script>
@@ -14,7 +14,7 @@
 <div class="auth-page">
     <div class="brand">
         <div class="brand-logo">🍀</div>
-        <div class="brand-name">好运爆棚</div>
+        <div class="brand-name">约刻</div>
         <div class="brand-sub">注册后即可使用约课与图片功能</div>
     </div>
 

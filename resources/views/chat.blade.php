@@ -9,7 +9,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="theme-color" content="#4C6EF5">
-    <title>好运爆棚</title>
+    <title>约刻</title>
     <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <link rel="stylesheet" href="{{ asset('css/chat.css') }}?v={{ filemtime(public_path('css/chat.css')) }}">
 </head>
@@ -22,8 +22,8 @@
         <div class="header-inner">
             <div class="header-avatar">🍀</div>
             <div class="header-info">
-                <div class="header-title">好运爆棚</div>
-                <div class="header-sub">约课 · Excel · 好运</div>
+                <div class="header-title">约刻</div>
+                <div class="header-sub">约课 · AI · Excel</div>
             </div>
             <div class="header-user">
                 <span class="user-badge" title="{{ $orgName }} · {{ auth()->user()->username }}">{{ $orgName }} · {{ auth()->user()->username }}</span>
@@ -38,7 +38,7 @@
     <!-- 消息区 -->
     <main class="messages" id="messages">
         <div class="msg system-msg" id="welcomeMsg">
-            <p>嗨，我是好运爆棚助手 🍀</p>
+            <p>嗨，我是约刻助手 🍀</p>
             <p>你可以：</p>
             <p>📅 <b>约课</b>：发送「给小明约明天上午10点」</p>
             <p>🖼️ <b>生成图片</b>：访问 <code>/generate</code> 打开图片生成页</p>
