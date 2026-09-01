@@ -279,10 +279,12 @@ class BookingService
     /**
      * 统计某学员/教练已完成课程数（仅 status=completed）
      */
-    public function countCompletedLessons(string $student = '', string $coach = ''): int
+    /**
+     * 约课次数统计：只要创建过约课记录就计入（不区分已完成/已约/已取消）
+     */
+    public function countLessons(string $student = '', string $coach = ''): int
     {
         return $this->scopedQuery($student, $coach)
-            ->where('status', BookingRecord::STATUS_COMPLETED)
             ->count();
     }
 

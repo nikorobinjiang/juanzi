@@ -405,9 +405,9 @@ class ChatController extends Controller
             return '你想查谁上了几节课呢？告诉我学员或教练的名字吧。';
         }
 
-        $count = $this->booking->countCompletedLessons($student, $coach);
+        $count = $this->booking->countLessons($student, $coach);
 
-        return $this->subjectLabel($student, $coach).'已经上完 '.$count.' 节课了。';
+        return $this->subjectLabel($student, $coach).'已经约了 '.$count.' 节课了。';
     }
 
     private function queryLast(array $data): string

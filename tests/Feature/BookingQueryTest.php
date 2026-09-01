@@ -40,8 +40,8 @@ class BookingQueryTest extends TestCase
         ]);
     }
 
-    /** 统计口径：只统计已完成课程，已预约/已取消不算，按学员/教练过滤 */
-    public function test_count_completed_lessons_only_counts_completed(): void
+    /** 统计口径：只要创建过约课记录就计入，不区分已完成/已约/已取消，按学员/教练过滤 */
+    public function test_count_lessons_counts_all_bookings(): void
     {
         $this->makeBooking(['status' => BookingRecord::STATUS_COMPLETED, 'start_at' => now()->subDays(3)->setTime(10, 0)]);
         $this->makeBooking(['status' => BookingRecord::STATUS_COMPLETED, 'start_at' => now()->subDays(2)->setTime(10, 0)]);
@@ -54,9 +54,9 @@ class BookingQueryTest extends TestCase
             'start_at' => now()->subDays(4)->setTime(10, 0),
         ]);
 
-        $this->assertSame(2, $this->booking->countCompletedLessons('小明'));
-        $this->assertSame(2, $this->booking->countCompletedLessons('', '王教练'));
-        $this->assertSame(1, $this->booking->countCompletedLessons('', '李教练'));
+        $this->assertSame(4, $this->booking->countLessons('小明'));
+        $this->assertSame(4, $this->booking->countLessons('', '王教练'));
+        $this->assertSame(1, $this->booking->countLessons('', '李教练'));
     }
 
     /** 最近一次已完成课程 / 下一次未开始的已约课程 */
