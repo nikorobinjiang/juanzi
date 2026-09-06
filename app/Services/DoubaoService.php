@@ -139,7 +139,7 @@ class DoubaoService
      * @param  string  $bookingsJson  当前约课数据 JSON，用于上下文
      * @return array  ['intent' => ..., 'data' => [...], 'reply' => ...]
      */
-    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson): array
+    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson, string $crmJson = ''): array
     {
         $now = now('Asia/Shanghai')->format('Y-m-d H:i');
 
@@ -153,7 +153,10 @@ class DoubaoService
 3. delete    —— 取消/删除约课（出现"取消/删掉/退掉"等）
 4. complete  —— 课程已完成（出现"上完了/上完课/下课了/结束"等）
 5. query     —— 查询问题（询问上课时间、次数、空闲情况等）
-6. other     —— 闲聊或其他无关内容
+6. create_card    —— 给会员办卡/买卡（出现"办卡/办…卡/月卡/年卡/次卡/游泳卡/健身卡/续卡"等）
+7. arrange_lessons —— 给学员安排/购买课时、分配教练（如"给学员A和B安排王教练，10次课"，只登记课时包与当前教练，不含具体上课时间）
+8. use_card       —— 会员到店使用了一次（出现"用了一次/来游了/今天游了1次/到店/打卡"，指会员卡消耗）
+9. other     —— 闲聊或其他无关内容
 
 query 意图必须再细分 query_type（放在 data 中），规则如下：
 - count    —— 统计上了几节课（如"上了几节课/上过多少次课/还剩几节课"，统计已完成课程）
@@ -178,10 +181,23 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
     "question": "query 意图时用户的具体问题原文",
     "query_type": "query 意图时的子类型：count/last/next/schedule/coach_availability/venue_availability/general，非 query 意图填空字符串",
     "date_from": "查询起始日期 Y-m-d，默认今天",
-    "date_to": "查询结束日期 Y-m-d，默认明天"
+    "date_to": "查询结束日期 Y-m-d，默认明天",
+    "member_name": "会员姓名（create_card / use_card 时填写，其余为空字符串）",
+    "phone": "手机号（办卡或建档时用户明确提到才填，否则空字符串）",
+    "card_type": "会员卡类型 month/year/visits（create_card 时：月卡=month、年卡=year、N次卡=visits）",
+    "total_count": "次卡总次数，整数（create_card 且 card_type=visits 时必须填写，如 20）",
+    "student_names": "学员姓名数组，可多个（arrange_lessons 时填写，如 [\"A\",\"B\"]；只有一个人也用数组）",
+    "lesson_count": "安排/购买课时节数，整数（arrange_lessons 时填写，如 10）",
+    "use_time": "会员使用时间，缺省为空字符串（系统默认当前时间）"
   },
   "reply": "用一句话概括你理解到的操作（如：已识别到为小明约 2026-08-25 10:00 的课）；若 intent 为 query 且 query_type 为 general，则直接在此给出对用户问题的完整回答（见下方 query 参数规则）"
 }
+
+CRM 意图识别规则（非常重要，新增意图）：
+- create_card（办卡）：出现"办卡/办月卡/办年卡/办次卡/办20次游泳卡/续卡"等表达时使用。示例："给钱多多办20次游泳卡，手机号13900000001" → card_type=visits、total_count=20、member_name=钱多多、phone=13900000001；"给吴芳办个年卡" → card_type=year；"帮郑小雨办月卡" → card_type=month。次卡必须解析出次数填 total_count；用户只说了"卡"没说类型时，按 user 用词判断（游泳卡/次卡/次数卡 → visits；月卡 → month；年卡 → year）。
+- arrange_lessons（安排课时/分配教练）：出现"安排/分配/报名/报…节课/买…次课"且带教练与课时数、但没有具体上课时间。示例："给学员A和B安排王教练，10次课" → student_names=["A","B"]、coach_name=王教练、lesson_count=10。多个学员都要填进 student_names。
+- use_card（会员报备消耗）：出现"XX用了一次/来游了一次/今天游了1次/到店用了一次/打卡"且对象是会员卡。示例："钱多多今天用了一次" → member_name=钱多多。注意与约课的 complete 区分：约课学员"上完课/下课了"属于 complete，只有会员/游泳卡消耗才用 use_card。
+- 以上三种 CRM 意图一旦命中，不要返回 create/update/delete/query/complete。
 
 时间解析规则（非常重要）：
 - 用户说"今天/明天/后天/周X/几点"时，结合当前时间 {$now} 换算成具体日期时间
@@ -204,6 +220,9 @@ PROMPT;
         // 用户消息 = 文字 + 可能的截图
         $userContent = $userText !== '' ? $userText : '（本条为图片消息，请识别图片中的约课信息）';
         $userContent .= "\n\n以下是当前全部约课记录(JSON)：\n".$bookingsJson;
+        if ($crmJson !== '') {
+            $userContent .= "\n\n以下是当前学员/会员名单(JSON)，办卡、安排课时、报备消耗时可参考姓名与手机号：\n".$crmJson;
+        }
 
         $messages = [
             ['role' => 'system', 'content' => $system],
@@ -244,7 +263,8 @@ PROMPT;
     {
         $system = <<<PROMPT
 你是羽毛球馆约课助手的消息过滤器。判断用户消息是否与约课相关——
-包括：约课、改课、取消、完成课程，查询课表、上课时间、剩余课时、教练/场地空闲，统计课时等。
+包括：约课、改课、取消、完成课程，查询课表、上课时间、剩余课时、教练/场地空闲，统计课时等；
+也包括 CRM 事务：给会员办卡/月卡/年卡/次卡、给学员安排课时/分配教练、会员到店使用报备（用了一次/来游了一次）。
 只回复一个单词：yes（相关）或 no（无关）。不要输出任何其他内容。
 PROMPT;
 

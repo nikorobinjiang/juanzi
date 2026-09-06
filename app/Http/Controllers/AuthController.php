@@ -113,7 +113,7 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
-        return redirect('/appoints');
+        return redirect('/');
     }
 
     /** 登录：机构 + 用户名 + 密码（用户名在机构内唯一，按机构+用户名精确匹配，跨机构同名互不干扰） */
@@ -147,7 +147,7 @@ class AuthController extends Controller
         ], (bool) $request->boolean('remember'))) {
             $request->session()->regenerate();
 
-            return redirect()->intended('/appoints');
+            return redirect()->intended('/');
         }
 
         return back()

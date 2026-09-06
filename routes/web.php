@@ -15,14 +15,19 @@ Route::middleware('guest')->group(function () {
 
 // 已登录：业务页面与登出
 Route::middleware('auth')->group(function () {
-    // 约课页
+    // 首页（两大入口：约课聊天 / 数据概览）
+    Route::get('/', function () {
+        return view('home');
+    });
+
+    // 约课页（保留旧直达链接）
     Route::get('/appoints', function () {
         return view('chat');
     });
 
-    // 根路径跳转到约课页（保持旧链接可用）
-    Route::get('/', function () {
-        return redirect('/appoints');
+    // 数据概览页
+    Route::get('/overview', function () {
+        return view('overview');
     });
 
     // 独立图片生成页

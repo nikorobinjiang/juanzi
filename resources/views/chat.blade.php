@@ -20,7 +20,8 @@
     <!-- 顶栏 -->
     <header class="header">
         <div class="header-inner">
-            <div class="header-avatar">🍀</div>
+            <a class="back-btn" href="{{ url('/') }}" aria-label="返回首页">‹</a>
+            <div class="header-avatar">💬</div>
             <div class="header-info">
                 <div class="header-title">约刻</div>
                 <div class="header-sub">约课 · AI · Excel</div>
@@ -75,6 +76,12 @@
         <img id="previewImg" alt="已选图片">
         <span id="previewText">已选择图片：作为约课截图识别</span>
         <button class="preview-close" id="btnClearPreview">✕</button>
+    </div>
+
+    <!-- 悬浮导航：概览 / 首页 -->
+    <div class="fab-stack">
+        <a class="fab-btn fab-data" href="{{ url('/overview') }}" title="数据概览" aria-label="数据概览">📊</a>
+        <a class="fab-btn fab-home" href="{{ url('/') }}" title="返回首页" aria-label="返回首页">🏠</a>
     </div>
 
 </div>

@@ -47,6 +47,85 @@ body {
 
 .header-user { margin-left: auto; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
+/* 顶栏返回图标（与数据页同款） */
+.back-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 12px;
+    background: rgba(255,255,255,.18);
+    color: #fff;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background .2s;
+}
+
+.back-btn:active { background: rgba(255,255,255,.32); }
+
+/* 窄屏隐藏机构徽标，保证功能按钮可见 */
+@media (max-width: 430px) {
+    .user-badge { display: none; }
+}
+
+/* ===== 悬浮导航（概览 / 首页 圆形按钮） ===== */
+.fab-stack {
+    position: absolute;
+    right: 14px;
+    bottom: calc(env(safe-area-inset-bottom) + 132px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    z-index: 25;
+    transition: opacity .2s ease, transform .2s ease;
+}
+
+.fab-btn {
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    line-height: 1;
+    text-decoration: none;
+    border: 1px solid rgba(76, 110, 245, .14);
+    box-shadow:
+        0 8px 18px rgba(76, 110, 245, .26),
+        0 2px 6px rgba(15, 23, 42, .08),
+        inset 0 1.5px 0 rgba(255, 255, 255, .95);
+    transition: transform .16s cubic-bezier(.2, .8, .3, 1.2), box-shadow .2s ease, filter .2s ease;
+    position: relative;
+}
+
+/* 数据概览：淡紫底 */
+.fab-data { background: linear-gradient(150deg, #eef1ff 0%, #dde4ff 100%); }
+
+/* 首页：淡青底 */
+.fab-home { background: linear-gradient(150deg, #e4f7ff 0%, #d3eefd 100%); }
+
+.fab-btn:active {
+    transform: scale(.9);
+    box-shadow: 0 3px 8px rgba(76, 110, 245, .2);
+}
+
+.fab-btn:hover {
+    filter: brightness(1.02);
+    transform: translateY(-2px);
+}
+
+/* Excel 面板展开时收起悬浮钮，避免遮挡 */
+.app:has(#panelExcel:not([hidden])) .fab-stack {
+    opacity: 0;
+    transform: translateY(8px);
+    pointer-events: none;
+}
+
 .user-badge {
     font-size: 11px;
     background: rgba(255,255,255,.16);
@@ -73,10 +152,11 @@ body {
 
 .header-avatar {
     width: 40px; height: 40px;
-    background: rgba(255,255,255,.2);
+    background: linear-gradient(150deg, #8FB5F7 0%, #6A8DF0 100%);
     border-radius: 12px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 22px;
+    font-size: 20px;
+    box-shadow: inset 0 -6px 12px rgba(30, 41, 59, .12), 0 1px 3px rgba(30, 41, 59, .1);
 }
 
 .header-title { font-size: 18px; font-weight: 700; letter-spacing: 1px; }

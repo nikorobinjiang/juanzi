@@ -7,6 +7,7 @@ use App\Models\BookingRecord;
 use App\Models\GeneratedImage;
 use App\Models\Message;
 use App\Services\BookingService;
+use App\Services\CrmService;
 use App\Services\DoubaoService;
 use App\Services\ExcelService;
 use Carbon\Carbon;
@@ -17,7 +18,7 @@ use Illuminate\Support\Facades\Log;
 
 class ChatController extends Controller
 {
-    /** 本地约课强特征关键词：命中直接放行，无需再调轻量豆包确认 */
+    /** 本地约课/CRM 强特征关键词：命中直接放行，无需再调轻量豆包确认 */
     private array $bookingKeywords = [
         '约课', '预约', '约一节', '约一次', '约个', '约了',
         '上课', '课表', '课程', '下课', '上完', '补课', '请假', '课时', '几节课', '上课时间',
@@ -25,11 +26,16 @@ class ChatController extends Controller
         '取消', '删掉', '退掉', '改课', '换课', '调整', '推迟', '提前',
         '场地', '有空', '空闲', '还剩',
         '打球', '羽毛球', '球场',
+        // CRM：办卡 / 安排课时 / 会员到店报备
+        '会员', '办卡', '办张', '月卡', '年卡', '次卡', '游泳卡', '健身卡', '续卡', '买卡', '办一张',
+        '安排', '分配', '报名', '报个', '买课', '报课',
+        '用了一次', '用一次', '来游了', '游了', '到店', '打卡', '用卡',
     ];
 
     public function __construct(
         private readonly DoubaoService $doubao,
         private readonly BookingService $booking,
+        private readonly CrmService $crm,
         private readonly ExcelService $excel,
     ) {}
 
@@ -219,9 +225,12 @@ class ChatController extends Controller
 
         $bookingsJson = $this->booking->toJsonForAI();
 
+        // 学员/会员/教练名单 JSON 一并给豆包作上下文（办卡/安排课时/报备时参照）
+        $crmJson = $this->crm->crmContextJson();
+
         // 用豆包解析用户意图与结构化数据
         try {
-            $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson);
+            $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson, $crmJson);
         } catch (\Throwable $e) {
             Log::error('约课解析失败', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 
@@ -264,6 +273,19 @@ class ChatController extends Controller
 
             case 'query':
                 $reply = $this->handleQuery($data, $text, $bookingsJson, (string) ($parsed['reply'] ?? ''));
+                break;
+
+            // CRM：办卡 / 安排课时 / 报备消耗（不触发约课 Excel 更新）
+            case 'create_card':
+                $reply = $this->doCreateCard($data);
+                break;
+
+            case 'arrange_lessons':
+                $reply = $this->doArrangeLessons($data);
+                break;
+
+            case 'use_card':
+                $reply = $this->doUseCard($data);
                 break;
 
             default:
@@ -374,6 +396,25 @@ class ChatController extends Controller
         return $result['success']
             ? $result['message'].'，表格已自动更新！'
             : $result['message'];
+    }
+
+    /* -----------------------------------------------------------------
+     | 内部：CRM（办卡 / 安排课时 / 报备消耗）
+     | ----------------------------------------------------------------- */
+
+    private function doCreateCard(array $data): string
+    {
+        return $this->crm->createCard($data);
+    }
+
+    private function doArrangeLessons(array $data): string
+    {
+        return $this->crm->arrangeLessons($data);
+    }
+
+    private function doUseCard(array $data): string
+    {
+        return $this->crm->useCard($data);
     }
 
     /* -----------------------------------------------------------------
