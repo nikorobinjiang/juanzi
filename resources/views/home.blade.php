@@ -52,7 +52,7 @@
         </a>
     </main>
 
-    <footer class="foot">约刻 · 让场馆管理更简单<span class="icp">浙ICP备2026071731号-2</span></footer>
+    <footer class="foot">约刻 · 让场馆管理更简单<span class="icp">浙ICP备2026071731号-1</span></footer>
 </div>
 
 </body>
