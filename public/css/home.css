@@ -196,3 +196,9 @@ body {
     font-size: 11px;
     color: #A8B4C8;
 }
+
+/* 备案号：独占一行，字号/字色/居中均继承 .foot */
+.foot .icp {
+    display: block;
+    margin-top: 6px;
+}
