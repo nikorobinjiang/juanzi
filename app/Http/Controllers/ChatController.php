@@ -127,14 +127,24 @@ class ChatController extends Controller
     {
         $afterId = (int) $request->input('after_id', 0);
 
+        // 聊天记录按登录用户隔离：只返回当前用户自己的消息（机构隔离由 OrganizationScope 负责）
+        // 未登录（异常情况）直接返回空，避免 where('user_id', null) 把无归属的历史消息漏出去
+        $userId = auth('web')->id();
+
+        if (! $userId) {
+            return response()->json(['messages' => []]);
+        }
+
         if ($afterId > 0) {
-            $messages = Message::where('id', '>', $afterId)
+            $messages = Message::where('user_id', $userId)
+                ->where('id', '>', $afterId)
                 ->orderBy('id', 'asc')
                 ->limit(min((int) $request->input('limit', 100), 500))
                 ->get()
                 ->map(fn (Message $m) => $this->messageToPayload($m));
         } else {
-            $messages = Message::orderBy('id', 'desc')
+            $messages = Message::where('user_id', $userId)
+                ->orderBy('id', 'desc')
                 ->limit(min((int) $request->input('limit', 100), 500))
                 ->get()
                 ->reverse()

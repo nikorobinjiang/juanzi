@@ -87,7 +87,8 @@ class BookingController extends Controller
     {
         return $request->validate([
             'student_name' => $required ? 'required|string|max:50' : 'nullable|string|max:50',
-            'coach_name' => $required ? 'required|string|max:50' : 'nullable|string|max:50',
+            // 教练可为空：留空时由 BookingService 默认填当前登录用户
+            'coach_name' => 'nullable|string|max:50',
             'start_at' => $required ? 'required|date_format:Y-m-d H:i' : 'nullable|date_format:Y-m-d H:i',
             'venue' => ['nullable', Rule::in((array) config('doubao.booking.venues'))],
             'remark' => 'nullable|string|max:255',

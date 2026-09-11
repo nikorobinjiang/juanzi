@@ -143,9 +143,19 @@ class DoubaoService
     {
         $now = now('Asia/Shanghai')->format('Y-m-d H:i');
 
+        // 当前登录用户即教练本人：显式告知豆包，保证"我/我的课"能解析到本人、
+        // 未指定教练时也能填成本人（与 BookingService::create 的默认教练兜底保持一致）
+        $currentUserName = trim((string) (auth('web')->user()?->name ?? ''));
+
+        $currentUserBlock = $currentUserName === '' ? '' : "\n当前登录用户（教练）：“{$currentUserName}”\n"
+            ."- “我 / 我的课 / 我什么时候上课 / 我的排课”等表述，一律按教练「{$currentUserName}」处理（query 的 schedule/count/last/next 把 coach_name 填为该姓名）\n"
+            ."- create 意图：用户没有明确说出教练是谁时，coach_name 填「{$currentUserName}」；用户明确说了其他教练则以用户说的为准\n"
+            ."- update / delete / complete：用户说“我的课”时，coach_name 填「{$currentUserName}」\n";
+
         $system = <<<PROMPT
 你是羽毛球馆约课管理助手，负责把用户的自然语言(或聊天截图中的文字)解析成结构化动作。
 当前时间：{$now}
+{$currentUserBlock}
 
 可执行动作 intent 仅限以下几种：
 1. create    —— 约新课（出现学员、教练、上课时间，或"约课/约一节课"等）
@@ -172,7 +182,7 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
   "intent": "create",
   "data": {
     "student_name": "学员姓名，缺失填空字符串",
-    "coach_name": "教练姓名，缺失填空字符串",
+    "coach_name": "教练姓名；用户未明确说出教练且有当前登录用户时填该用户姓名，否则填空字符串",
     "start_at": "上课开始时间，格式 Y-m-d H:i，必须是完整可计算的时间",
     "remark": "备注，没有则空字符串",
     "venue": "场地，1A/1B/2A/2B，用户指定才填，否则空字符串",

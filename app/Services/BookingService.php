@@ -36,6 +36,11 @@ class BookingService
         $venue = trim((string) ($data['venue'] ?? ''));
         $coach = trim((string) ($data['coach_name'] ?? ''));
 
+        // 未指定教练时，默认由当前登录用户（教练）带课；用户明确说出教练名时不覆盖
+        if ($coach === '') {
+            $coach = trim((string) (auth('web')->user()?->name ?? ''));
+        }
+
         // 教练冲突：同一教练同一时间只能带一节课（与场地无关，先校验）
         if ($coach !== '') {
             $coachConflict = $this->checkCoachConflict($coach, $startAt, $endAt);
@@ -83,7 +88,8 @@ class BookingService
 
         $booking = BookingRecord::create([
             'student_name' => trim((string) ($data['student_name'] ?? '')),
-            'coach_name' => trim((string) ($data['coach_name'] ?? '')),
+            // 用兜底后的 $coach，避免"冲突检测用兜底值、落库却写空值"的不一致
+            'coach_name' => $coach,
             'start_at' => $startAt,
             'end_at' => $endAt,
             'venue' => $venue,
