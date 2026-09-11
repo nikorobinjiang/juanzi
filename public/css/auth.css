@@ -20,6 +20,7 @@ body {
 }
 
 .auth-page {
+    position: relative;
     min-height: 100dvh;
     display: flex;
     flex-direction: column;
@@ -130,10 +131,12 @@ select.form-input { cursor: pointer; }
 .auth-footer a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .auth-footer a:active { opacity: .7; }
 
-/* 备案号：贴页面底部，字号/颜色与首页页脚一致 */
+/* 备案号：绝对定位于页面底部，不参与 flex 布局，表单居中位置不受影响 */
 .page-icp {
-    margin-top: auto;
-    padding-top: 20px;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: calc(env(safe-area-inset-bottom) + 12px);
     font-size: 11px;
     color: #A8B4C8;
     text-align: center;
