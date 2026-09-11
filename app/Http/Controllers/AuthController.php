@@ -8,6 +8,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Cookie;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -18,11 +19,20 @@ use Illuminate\View\View;
  */
 class AuthController extends Controller
 {
-    /** 登录页（机构下拉列表来自 organizations 表） */
-    public function showLogin(): View
+    /** “上次选择的机构” Cookie 名（下次打开登录页默认选中该机构） */
+    private const LAST_ORG_COOKIE = 'last_org_code';
+
+    /** 记住时长：1 年（单位分钟） */
+    private const LAST_ORG_COOKIE_MINUTES = 60 * 24 * 365;
+
+    /** 登录页（机构下拉列表来自 organizations 表，默认选中上次登录成功的机构） */
+    public function showLogin(Request $request): View
     {
+        $organizations = $this->organizationList();
+
         return view('login', [
-            'organizations' => $this->organizationList(),
+            'organizations' => $organizations,
+            'defaultOrganization' => $this->rememberedOrganization($request, $organizations),
         ]);
     }
 
@@ -113,6 +123,9 @@ class AuthController extends Controller
         Auth::login($user);
         $request->session()->regenerate();
 
+        // 记住本次选择的机构，下次打开登录页默认选中
+        $this->rememberOrganization($validated['organization_code']);
+
         return redirect('/');
     }
 
@@ -147,6 +160,9 @@ class AuthController extends Controller
         ], (bool) $request->boolean('remember'))) {
             $request->session()->regenerate();
 
+            // 记住本次选择的机构，下次打开登录页默认选中
+            $this->rememberOrganization($validated['organization_code']);
+
             return redirect()->intended('/');
         }
 
@@ -163,6 +179,37 @@ class AuthController extends Controller
         $request->session()->regenerateToken();
 
         return redirect('/login');
+    }
+
+    /** 记住用户本次选择的机构（写 1 年 Cookie，登出后依然保留） */
+    private function rememberOrganization(string $code): void
+    {
+        Cookie::queue(self::LAST_ORG_COOKIE, $code, self::LAST_ORG_COOKIE_MINUTES);
+    }
+
+    /**
+     * 读取“上次选择的机构”code
+     *
+     * 无记录、或该机构已从 organizations 表移除时返回空字符串，
+     * 让登录页下拉保持未选中状态（不预选任何机构）
+     *
+     * @param  array<int, array{code: string, name: string}>  $organizations
+     */
+    private function rememberedOrganization(Request $request, array $organizations): string
+    {
+        $code = (string) $request->cookie(self::LAST_ORG_COOKIE);
+
+        if ($code === '') {
+            return '';
+        }
+
+        foreach ($organizations as $org) {
+            if ($org['code'] === $code) {
+                return $code;
+            }
+        }
+
+        return '';
     }
 
     /** 从 organizations 表提取机构 code 列表 */

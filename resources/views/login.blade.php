@@ -29,8 +29,10 @@
             <div class="form-group">
                 <label class="form-label" for="organization_code">所属机构</label>
                 <select class="form-input" id="organization_code" name="organization_code" required autofocus>
+                    {{-- 默认选中上次登录成功使用的机构；无记录时保持空（强制用户手动选择） --}}
+                    <option value="" @selected(old('organization_code', $defaultOrganization) === '')>请选择所属机构</option>
                     @foreach ($organizations as $org)
-                        <option value="{{ $org['code'] }}" @selected(old('organization_code', $org['code']) === $org['code'])>
+                        <option value="{{ $org['code'] }}" @selected(old('organization_code', $defaultOrganization) === $org['code'])>
                             {{ $org['name'] }}
                         </option>
                     @endforeach
