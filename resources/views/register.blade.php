@@ -74,6 +74,8 @@
 
         <div class="auth-footer">已有账号？<a href="{{ url('/login') }}">直接登录</a></div>
     </div>
+
+    <div class="page-icp">浙ICP备2026071731号-2</div>
 </div>
 
 <script src="{{ asset('js/auth.js') }}?v={{ filemtime(public_path('js/auth.js')) }}"></script>

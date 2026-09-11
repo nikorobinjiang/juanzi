@@ -129,3 +129,12 @@ select.form-input { cursor: pointer; }
 .auth-footer { text-align: center; margin-top: 18px; font-size: 13px; color: var(--gray); }
 .auth-footer a { color: var(--primary); text-decoration: none; font-weight: 500; }
 .auth-footer a:active { opacity: .7; }
+
+/* 备案号：贴页面底部，字号/颜色与首页页脚一致 */
+.page-icp {
+    margin-top: auto;
+    padding-top: 20px;
+    font-size: 11px;
+    color: #A8B4C8;
+    text-align: center;
+}

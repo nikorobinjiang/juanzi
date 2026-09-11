@@ -59,6 +59,8 @@
 
         <div class="auth-footer">还没有账号？<a href="{{ url('/register') }}">立即注册</a></div>
     </div>
+
+    <div class="page-icp">浙ICP备2026071731号-2</div>
 </div>
 
 </body>
