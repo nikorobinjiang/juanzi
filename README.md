@@ -1,4 +1,4 @@
-# 约刻 · 个人网站（juanzi.site）
+# 约刻 · 个人网站（www.yueke.tech）
 
 手机端优先的聊天式个人网站。后端 Laravel 12 + MySQL，AI 能力由豆包（火山方舟 Ark）提供。
 支持**账号体系与机构级数据隔离**：注册 / 登录后使用，同一个机构内的多个账号共享数据，不同机构之间数据完全隔离。
@@ -111,7 +111,7 @@ return [
 | GET | /api/excel/generate | 生成最新 Excel |
 | GET | /api/excel/download/{filename} | 下载 Excel |
 
-## 部署到 juanzi.site 提醒
+## 部署到 www.yueke.tech 提醒
 
 - 站点根目录指向 `public/`（Nginx `root /path/juanzi/public;`），并做 `/storage` 软链
 - `php artisan storage:link` 后在 Nginx 里对应 `/storage` 静态目录
