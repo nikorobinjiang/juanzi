@@ -371,8 +371,15 @@ class ImportFixedSchedules extends Command
         }
 
         $path = storage_path('app/'.self::REVIEW_FILE);
-        @mkdir(dirname($path), 0775, true);
-        file_put_contents($path, implode(PHP_EOL, $lines).PHP_EOL);
+
+        try {
+            @mkdir(dirname($path), 0775, true);
+            file_put_contents($path, implode(PHP_EOL, $lines).PHP_EOL);
+        } catch (\Throwable $e) {
+            // 清单只是旁路产物（写不出来不影响导入结果），例如 storage/app 权限不足时不应中断导入
+            $this->warn('核对清单写入失败（不影响导入结果）：'.$e->getMessage());
+            Log::warning('固定课表核对清单写入失败', ['path' => $path, 'error' => $e->getMessage()]);
+        }
 
         return self::REVIEW_FILE;
     }
