@@ -19,12 +19,13 @@ class BookingRecord extends Model
 
     protected $fillable = [
         'student_name', 'coach_name', 'start_at', 'end_at',
-        'venue', 'status', 'remark', 'organization_code',
+        'venue', 'fixed_schedule_id', 'status', 'remark', 'organization_code',
     ];
 
     protected $casts = [
         'start_at' => 'datetime',
         'end_at' => 'datetime',
+        'fixed_schedule_id' => 'integer',
     ];
 
     protected static function booted(): void

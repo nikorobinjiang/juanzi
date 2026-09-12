@@ -3,21 +3,65 @@
 namespace App\Services;
 
 use App\Models\BookingRecord;
-use App\Models\Student;
+use App\Models\FixedSchedule;
+use App\Support\BookingWindow;
+use App\Support\FixedSchedulePrecheck;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\Log;
 
 /**
  * 约课核心业务：冲突检测、增删改、周分组
  */
 class BookingService
 {
+    /** 交给豆包的课程上下文条数上限（窗口内记录已大幅减少，这里只做异常数据的兜底） */
+    private const AI_CONTEXT_LIMIT = 400;
+
+    /** 自动分配候选场地（通常为 1A/1B/2A/2B 半场） */
     private array $venues;
 
-    public function __construct()
+    /** 整场 → 半场映射：['1' => ['1A', '1B'], '2' => ['2A', '2B']] */
+    private array $fullCourts;
+
+    public function __construct(private readonly FixedSchedulePrecheck $precheck = new FixedSchedulePrecheck)
     {
-        $this->venues = (array) config('doubao.booking.venues', ['1A', '1B', '2A', '2B']);
+        $this->venues = (array) config(
+            'doubao.booking.auto_assign_venues',
+            config('doubao.booking.venues', ['1A', '1B', '2A', '2B'])
+        );
+        $this->fullCourts = (array) config('doubao.booking.full_courts', []);
+    }
+
+    /**
+     * 场地占位集合：把整场展开为"整场 + 两个半场"，半场也关联其所属整场。
+     *
+     * - 1  → ['1', '1A', '1B']（约整场时，1A/1B 都不能再约）
+     * - 1A → ['1A', '1']       （1 号整场被占时，1A 也不可约）
+     * - 其它区域场地 → 仅自身
+     *
+     * @return array<int, string>
+     */
+    public function venueSlots(string $venue): array
+    {
+        $venue = trim($venue);
+
+        if ($venue === '') {
+            return [];
+        }
+
+        // 整场：展开出两个半场
+        if (isset($this->fullCourts[$venue])) {
+            return array_values(array_unique(array_merge([$venue], (array) $this->fullCourts[$venue])));
+        }
+
+        // 半场：关联其所属整场（整场被占用时半场同样不可约）
+        foreach ($this->fullCourts as $full => $halves) {
+            if (in_array($venue, (array) $halves, true)) {
+                return array_values(array_unique(array_merge([$venue, (string) $full])));
+            }
+        }
+
+        return [$venue];
     }
 
     /* -----------------------------------------------------------------
@@ -97,6 +141,7 @@ class BookingService
             'start_at' => $startAt,
             'end_at' => $endAt,
             'venue' => $venue,
+            'fixed_schedule_id' => $data['fixed_schedule_id'] ?? null,
             'status' => BookingRecord::STATUS_BOOKED,
             'remark' => trim((string) ($data['remark'] ?? '')),
         ]);
@@ -127,10 +172,8 @@ class BookingService
     /**
      * 约课成功后确保学员档案存在（只建档，不累加课时）
      *
-     * - 课时：新建档案固定 0 节（约课不等于买课，买课时走「安排课时」指令）
-     * - 教练：档案里还没有教练时，用本次约课教练补上；已有教练不覆盖
-     * - 机构：仅在有登录态（能取到机构 code）时建档，避免数据落到错误的机构
-     * - 容错：建档失败只记日志，不影响约课本身（约课已落库，不回滚）
+     * 建档逻辑已抽到 StudentProfileService（CLI / 导入命令可显式传机构）。
+     * 这里保持原有行为：建档失败只记日志，不影响约课本身。
      *
      * @param  string  $name  学员姓名（调用方已 trim）
      * @param  string  $coach 本次约课教练（create() 内已兜底为当前登录用户）
@@ -138,45 +181,7 @@ class BookingService
      */
     private function ensureStudentProfile(string $name, string $coach = ''): bool
     {
-        if ($name === '') {
-            return false;
-        }
-
-        // 无登录态（CLI / 未认证请求）拿不到机构，直接跳过，避免跨机构误匹配同名学员
-        $organizationCode = (string) (auth('web')->user()?->organization_code ?? '');
-        if ($organizationCode === '') {
-            return false;
-        }
-
-        try {
-            /** @var Student $student */
-            $student = Student::firstOrNew(['name' => $name]);
-            $created = ! $student->exists;
-
-            if ($created) {
-                $student->organization_code = $organizationCode;
-                $student->lessons_total = 0;
-                $student->remark = '约课自动建档';
-            }
-
-            if ($coach !== '' && (string) $student->coach_name === '') {
-                $student->coach_name = $coach;
-            }
-
-            // 已有档案且无需回填教练时不写库
-            if ($created || $student->isDirty()) {
-                $student->save();
-            }
-
-            return $created;
-        } catch (\Throwable $e) {
-            Log::warning('约课自动建档失败', [
-                'student_name' => $name,
-                'error' => $e->getMessage(),
-            ]);
-
-            return false;
-        }
+        return app(StudentProfileService::class)->ensure($name, $coach);
     }
 
     /* -----------------------------------------------------------------
@@ -308,10 +313,17 @@ class BookingService
 
     /**
      * 检测某场地在时间段内是否冲突（跳过 ignoreId）
+     *
+     * 场地按"整场/半场"归一化：约整场 1 时 1A/1B 都算冲突；约 1A 时整场 1 也算冲突。
+     *
+     * 返回类型可能是 BookingRecord（库内已有记录）或 FixedSchedule（窗口外、尚未展开的固定场模板）：
+     * 固定场只提前展开两周，第 3~4 周还没有记录，若不做模板预检，之后自动补齐时固定场会被判冲突而丢失。
      */
-    public function checkConflict(string $venue, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): ?BookingRecord
+    public function checkConflict(string $venue, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): BookingRecord|FixedSchedule|null
     {
-        return BookingRecord::where('venue', $venue)
+        $slots = $this->venueSlots($venue);
+
+        $conflict = BookingRecord::whereIn('venue', $slots)
             ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
             ->where('id', '!=', $ignoreId ?? 0)
             ->where(function ($q) use ($startAt, $endAt) {
@@ -322,14 +334,18 @@ class BookingService
                     });
             })
             ->first();
+
+        return $conflict ?? $this->precheck->conflictForVenue($slots, $startAt, $endAt);
     }
 
     /**
      * 检测某教练在时间段内是否冲突（同一教练同一时间只能带一节课，跳过 ignoreId）
+     *
+     * 与 checkConflict() 同理：库内没有记录时按固定课表模板预检。
      */
-    public function checkCoachConflict(string $coach, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): ?BookingRecord
+    public function checkCoachConflict(string $coach, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): BookingRecord|FixedSchedule|null
     {
-        return BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
+        $conflict = BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
             ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
             ->where('id', '!=', $ignoreId ?? 0)
             ->where(function ($q) use ($startAt, $endAt) {
@@ -340,6 +356,8 @@ class BookingService
                     });
             })
             ->first();
+
+        return $conflict ?? $this->precheck->conflictForCoach($coach, $startAt, $endAt);
     }
 
     /* -----------------------------------------------------------------
@@ -349,6 +367,22 @@ class BookingService
     public function all(): Collection
     {
         return BookingRecord::orderBy('start_at')->orderBy('venue')->get();
+    }
+
+    /**
+     * 展示窗口内的约课记录（当前周 + 未来三周，start_at 升序）
+     *
+     * 「历史记录不显示」的唯一入口：约课页周列表、Excel 导出、豆包上下文统一走这里。
+     * 统计类查询（countLessons / lastLesson / nextLesson 等）不经过此处，保持全量口径，
+     * 否则"剩余课时"会被算少。
+     */
+    public function windowed(): Collection
+    {
+        return BookingRecord::where('start_at', '>=', BookingWindow::displayStart())
+            ->where('start_at', '<', BookingWindow::displayEnd())
+            ->orderBy('start_at')
+            ->orderBy('venue')
+            ->get();
     }
 
     /* -----------------------------------------------------------------
@@ -391,14 +425,33 @@ class BookingService
     }
 
     /**
-     * 某学员/教练在时间段内的排课（默认未来 30 天，不含已取消）
+     * 某学员/教练在时间段内的排课（不含已取消）
+     *
+     * 默认（不传区间）取展示窗口；显式传区间时与展示窗口取交集，
+     * 保证"历史记录不显示"在所有查询入口一致（问上周的课同样查不到）。
      */
     public function schedule(string $student = '', string $coach = '', ?Carbon $from = null, ?Carbon $to = null): Collection
     {
+        $windowStart = BookingWindow::displayStart();
+        $windowEnd = BookingWindow::displayEnd();
+
+        // $to 按"含当天"理解（调用方传的是当天 00:00），因此结束边界取次日 00:00
+        $queryStart = $from && $from->gt($windowStart) ? $from->copy() : $windowStart->copy();
+        $queryEnd = $to ? $to->copy()->addDay() : $windowEnd->copy();
+
+        // 查询区间完全落在展示窗口之外（纯历史或太远）：与"历史记录不显示"一致，返回空
+        if ($queryEnd->lte($windowStart) || $queryStart->gte($windowEnd)) {
+            return collect();
+        }
+
+        if ($queryEnd->gt($windowEnd)) {
+            $queryEnd = $windowEnd->copy();
+        }
+
         return $this->scopedQuery($student, $coach)
             ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
-            ->when($from, fn ($q) => $q->where('start_at', '>=', $from))
-            ->when($to, fn ($q) => $q->where('start_at', '<', $to->copy()->addDay()))
+            ->where('start_at', '>=', $queryStart)
+            ->where('start_at', '<', $queryEnd)
             ->orderBy('start_at')
             ->get();
     }
@@ -424,7 +477,8 @@ class BookingService
      */
     public function venueAvailability(string $venue, Carbon $from, Carbon $to): array
     {
-        return $this->buildAvailability($from, $to, BookingRecord::where('venue', $venue)
+        // 整场/半场互斥：查 1 号场地时把 1A/1B 的占用也计入；查 1A 时也计入整场 1
+        return $this->buildAvailability($from, $to, BookingRecord::whereIn('venue', $this->venueSlots($venue))
             ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
             ->where('start_at', '<', $to->copy()->addDay())
             ->where('end_at', '>', $from)
@@ -490,7 +544,7 @@ class BookingService
     }
 
     /**
-     * 按"周"分组（周一为一周开始），返回：
+     * 按"周"分组（周一为一周开始），只含展示窗口内的记录：
      * [
      *   ['week_start' => '2026-08-24', 'week_end' => '2026-08-30', 'label' => '8月24日-8月30日', 'items' => [...]],
      * ]
@@ -499,7 +553,7 @@ class BookingService
     {
         $grouped = collect();
 
-        $this->all()->each(function (BookingRecord $booking) use ($grouped) {
+        $this->windowed()->each(function (BookingRecord $booking) use ($grouped) {
             $weekStart = $booking->start_at->copy()->startOfWeek(Carbon::MONDAY);
             $key = $weekStart->format('Y-m-d');
 
@@ -553,16 +607,17 @@ class BookingService
     }
 
     /**
-     * 输出给豆包的约课 JSON（仅未取消记录）
+     * 输出给豆包的约课 JSON
+     *
+     * 只给展示窗口内（当前周 + 未来三周）的记录：历史记录不展示也不参与改课/取消，
+     * 取消态记录不传（豆包只需要知道还有哪些课）。窗口内条数已远小于原来的全量，
+     * 仍保留 AI_CONTEXT_LIMIT 上限，防止异常数据撑爆 prompt（按 start_at 升序取最近的）。
      */
     public function toJsonForAI(): string
     {
-        // 只取最近的记录：取消/修改都是针对近期课程，全量 JSON 会让豆包 prompt 过大、响应变慢甚至超时
-        return $this->all()
+        return $this->windowed()
             ->reject(fn (BookingRecord $b) => $b->status === BookingRecord::STATUS_CANCELLED)
-            ->sortByDesc('start_at')
-            ->take(100)
-            ->sortBy('start_at')
+            ->take(self::AI_CONTEXT_LIMIT)
             ->map(function (BookingRecord $b) {
                 return [
                     'id' => $b->id,

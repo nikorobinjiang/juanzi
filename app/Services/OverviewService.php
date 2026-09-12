@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\BookingRecord;
 use App\Models\MembershipCard;
 use App\Models\Student;
+use App\Support\BookingWindow;
 use Illuminate\Support\Collection;
 
 /**
@@ -65,6 +66,9 @@ class OverviewService
 
     /**
      * 学员详情（档案 + 统计 + 最近约课记录）
+     *
+     * 最近约课记录与其它展示一致：只显示展示窗口内（当前周 + 未来三周）的记录，
+     * 历史记录不显示；课时数（lesson_count）仍按全量统计。
      */
     public function studentDetail(int $id): ?array
     {
@@ -74,6 +78,8 @@ class OverviewService
         }
 
         $bookings = BookingRecord::where('student_name', 'like', '%'.$student->name.'%')
+            ->where('start_at', '>=', BookingWindow::displayStart())
+            ->where('start_at', '<', BookingWindow::displayEnd())
             ->orderByDesc('start_at')
             ->limit(30)
             ->get();

@@ -139,7 +139,7 @@ class DoubaoService
      * @param  string  $bookingsJson  当前约课数据 JSON，用于上下文
      * @return array  ['intent' => ..., 'data' => [...], 'reply' => ...]
      */
-    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson, string $crmJson = ''): array
+    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson, string $crmJson = '', string $fixedJson = ''): array
     {
         $now = now('Asia/Shanghai')->format('Y-m-d H:i');
 
@@ -166,7 +166,8 @@ class DoubaoService
 6. create_card    —— 给会员办卡/买卡（出现"办卡/办…卡/月卡/年卡/次卡/游泳卡/健身卡/续卡"等）
 7. arrange_lessons —— 给学员安排/购买课时、分配教练（如"给学员A和B安排王教练，10次课"，只登记课时包与当前教练，不含具体上课时间）
 8. use_card       —— 会员到店使用了一次（出现"用了一次/来游了/今天游了1次/到店/打卡"，指会员卡消耗）
-9. other     —— 闲聊或其他无关内容
+9. rename_coach  —— 批量修改教练姓名/姓氏（如"把孟改成孟宇""教练孟改成孟宇"，是对教练名的整体更正，不是改某节课）
+10. other     —— 闲聊或其他无关内容
 
 query 意图必须再细分 query_type（放在 data 中），规则如下：
 - count    —— 统计上了几节课（如"上了几节课/上过多少次课/还剩几节课"，统计已完成课程）
@@ -185,8 +186,13 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
     "coach_name": "教练姓名；用户未明确说出教练且有当前登录用户时填该用户姓名，否则填空字符串",
     "start_at": "上课开始时间，格式 Y-m-d H:i，必须是完整可计算的时间",
     "remark": "备注，没有则空字符串",
-    "venue": "场地，1A/1B/2A/2B，用户指定才填，否则空字符串",
+    "venue": "场地，开发区用 1A/1B/2A/2B（半场）或 1/2（整场 AB）；其它区域用 龙安湖/余之城/一小/信达/教育学院。用户指定才填，否则空字符串",
     "target_id": "始终填 0（不要尝试在约课记录里查找 id，系统会自动按学员/时间匹配定位）",
+    "scope": "update/delete 时的作用范围：once=只改这一次（默认，用户说“这周X/下周X”“这一次”“今天”）；future=以后每周都改（用户说“以后都”“每次”“每周固定的”“固定场”“从这个月起”）。其余意图填空字符串",
+    "weekday": "周一=1 … 周日=7（scope=future 或用户说每周几时填写，否则填 0）",
+    "start_time": "固定场次的上课时间 H:i（scope=future 时填写，如 19:00），无则空字符串",
+    "old_name": "rename_coach 时的原名/原姓氏（如“孟”）",
+    "new_name": "rename_coach 时的新名/新姓氏（如“孟宇”）",
     "new_data": {},
     "question": "query 意图时用户的具体问题原文",
     "query_type": "query 意图时的子类型：count/last/next/schedule/coach_availability/venue_availability/general，非 query 意图填空字符串",
@@ -208,6 +214,16 @@ CRM 意图识别规则（非常重要，新增意图）：
 - arrange_lessons（安排课时/分配教练）：出现"安排/分配/报名/报…节课/买…次课"且带教练与课时数、但没有具体上课时间。示例："给学员A和B安排王教练，10次课" → student_names=["A","B"]、coach_name=王教练、lesson_count=10。多个学员都要填进 student_names。
 - use_card（会员报备消耗）：出现"XX用了一次/来游了一次/今天游了1次/到店用了一次/打卡"且对象是会员卡。示例："钱多多今天用了一次" → member_name=钱多多。注意与约课的 complete 区分：约课学员"上完课/下课了"属于 complete，只有会员/游泳卡消耗才用 use_card。
 - 以上三种 CRM 意图一旦命中，不要返回 create/update/delete/query/complete。
+- rename_coach（教练改名）：出现"把某教练的姓/名改成…"，且针对的是教练本人（不是某个学员、某一节课）时使用。示例："把孟改成孟宇" → old_name=孟、new_name=孟宇；"教练黎凯改叫黎凯文" → old_name=黎凯、new_name=黎凯文。仅当明确是在说教练时才用该意图，其余改名（学员改名）不要用。
+
+固定场次与作用范围（scope）规则（非常重要）：
+- 系统里除了"某一天的约课记录"，还有"每周固定场次"。用户的话里带"以后/每次/每周/固定场/每个月都"，说明要改的是固定场次，scope 必须填 future；否则 scope 填 once（只改这一次）。
+- 示例："这周一小明不来了" → intent=delete、scope=once、student_name=小明、start_at=最近的那个周一该时间（系统只删这一次）
+- 示例："以后每周一10点的小明固定场取消" → intent=delete、scope=future、student_name=小明、weekday=1、start_time=10:00
+- 示例："以后小明周一10点改到11点" → intent=update、scope=future、student_name=小明、weekday=1、start_time=10:00、new_data={"start_time": "11:00", "start_at": "2026-09-21 11:00"}
+- 示例："把小明以后都换到2号场地" → intent=update、scope=future、student_name=小明、new_data={"venue": "2"}
+- scope=future 时：定位用 weekday（必填）+ start_time（尽量填）+ student_name（有就填），并在 new_data 里给出要改成的新值（改时间要同时给出 start_at 与 start_time）
+- 判断不了是"这一次"还是"以后都"时，scope 填 once（改动最小、最安全）
 
 时间解析规则（非常重要）：
 - 用户说"今天/明天/后天/周X/几点"时，结合当前时间 {$now} 换算成具体日期时间
@@ -219,6 +235,7 @@ query 意图的参数规则（非常重要）：
 - 空闲查询（coach_availability/venue_availability）：date_from/date_to 默认今天到明天，用户提到具体日期再覆盖
 - 计数/最近课程/排课查询：能提取到学员或教练就如实填，提取不到填空字符串，不要猜
 - "教练什么时候有空"这类问题，教练姓名填到 coach_name；"场地有空"则场地名填到 venue
+- 场地查询同时支持半场 1A/1B/2A/2B 与整场 1/2，整场 1 = 1A+1B（整场被占用时 1A/1B 都不可约，反之亦然）；其它区域场地填 龙安湖/余之城/一小/信达/教育学院
 - general 类型（开放问题/闲聊）：reply 字段直接给出完整、口语化的最终回答（1-3 句话，可引用约课 JSON 数据作答，不要编造），此时 reply 不是概括句而是最终答案
 
 修改/取消/完成时的定位规则（非常重要）：
@@ -232,6 +249,9 @@ PROMPT;
         $userContent .= "\n\n以下是当前全部约课记录(JSON)：\n".$bookingsJson;
         if ($crmJson !== '') {
             $userContent .= "\n\n以下是当前学员/会员名单(JSON)，办卡、安排课时、报备消耗时可参考姓名与手机号：\n".$crmJson;
+        }
+        if ($fixedJson !== '') {
+            $userContent .= "\n\n以下是当前每周固定场次(JSON)，用户说“以后/每周/固定场”时按这里的学员、星期与时间定位：\n".$fixedJson;
         }
 
         $messages = [

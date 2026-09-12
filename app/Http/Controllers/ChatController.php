@@ -10,6 +10,7 @@ use App\Services\BookingService;
 use App\Services\CrmService;
 use App\Services\DoubaoService;
 use App\Services\ExcelService;
+use App\Services\FixedScheduleService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -25,6 +26,8 @@ class ChatController extends Controller
         '教练', '老师', '学员', '学生',
         '取消', '删掉', '退掉', '改课', '换课', '调整', '推迟', '提前',
         '场地', '有空', '空闲', '还剩',
+        // 固定场次：说"以后/每周/固定场"时改的是模板而不是单次记录
+        '固定场', '固定', '每周', '每个星期', '以后都', '以后', '不拼',
         '打球', '羽毛球', '球场',
         // CRM：办卡 / 安排课时 / 会员到店报备
         '会员', '办卡', '办张', '月卡', '年卡', '次卡', '游泳卡', '健身卡', '续卡', '买卡', '办一张',
@@ -37,6 +40,7 @@ class ChatController extends Controller
         private readonly BookingService $booking,
         private readonly CrmService $crm,
         private readonly ExcelService $excel,
+        private readonly FixedScheduleService $fixedSchedule,
     ) {}
 
     /**
@@ -238,9 +242,12 @@ class ChatController extends Controller
         // 学员/会员/教练名单 JSON 一并给豆包作上下文（办卡/安排课时/报备时参照）
         $crmJson = $this->crm->crmContextJson();
 
+        // 每周固定场次 JSON：用户说"以后/每周/固定场"时需要按模板定位
+        $fixedJson = $this->fixedSchedule->toJsonForAI();
+
         // 用豆包解析用户意图与结构化数据
         try {
-            $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson, $crmJson);
+            $parsed = $this->doubao->parseBookingAction($text, $imageRef, $bookingsJson, $crmJson, $fixedJson);
         } catch (\Throwable $e) {
             Log::error('约课解析失败', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
 
@@ -283,6 +290,11 @@ class ChatController extends Controller
 
             case 'query':
                 $reply = $this->handleQuery($data, $text, $bookingsJson, (string) ($parsed['reply'] ?? ''));
+                break;
+
+            // 教练姓氏批量改名（预约记录 / 固定场模板 / 学员档案）
+            case 'rename_coach':
+                $reply = $this->doRenameCoach($data);
                 break;
 
             // CRM：办卡 / 安排课时 / 报备消耗（不触发约课 Excel 更新）
@@ -343,6 +355,11 @@ class ChatController extends Controller
 
     private function doUpdate(array $data): string
     {
+        // 作用范围=以后每周都改 → 改的是固定场次模板，会影响之后所有未发生的周
+        if ($this->isFutureScope($data)) {
+            return $this->doUpdateFuture($data);
+        }
+
         $located = $this->booking->locateTarget($data);
 
         if ($located['need_info']) {
@@ -370,6 +387,11 @@ class ChatController extends Controller
 
     private function doDelete(array $data): string
     {
+        // 作用范围=以后每周都取消 → 停用固定场次模板，只取消未来未发生的记录
+        if ($this->isFutureScope($data)) {
+            return $this->doDeleteFuture($data);
+        }
+
         $located = $this->booking->locateTarget($data);
 
         if ($located['need_info']) {
@@ -382,6 +404,138 @@ class ChatController extends Controller
         $result = $this->booking->delete($located['booking']->id);
 
         return $result['success'] ? $result['message'].'，约课表已更新！' : $result['message'];
+    }
+
+    /* -----------------------------------------------------------------
+     | 内部：固定场次（scope=future）与教练改名
+     | ----------------------------------------------------------------- */
+
+    /**
+     * 判断是否"以后每周都"作用范围（默认 once，只改这一次）
+     */
+    private function isFutureScope(array $data): bool
+    {
+        return strtolower(trim((string) ($data['scope'] ?? ''))) === 'future';
+    }
+
+    /**
+     * scope=future 的修改：定位模板 → 改模板 → 重算未来未发生的记录
+     */
+    private function doUpdateFuture(array $data): string
+    {
+        $located = $this->fixedSchedule->locate($data);
+
+        if ($located['need_info'] || ! $located['success'] || ! $located['template']) {
+            return $located['message'];
+        }
+
+        $template = $located['template'];
+        $newData = $this->buildFutureNewData($data);
+
+        if (empty($newData)) {
+            return '想把这个固定场次改成什么呢？例如：以后都改到 11 点，或者换到 2 号场地。';
+        }
+
+        $result = $this->fixedSchedule->syncFuture($template, $newData);
+        $updated = $result['template']->fresh() ?? $result['template'];
+
+        $message = '已更新固定场次「'.$updated->summary.'」：'
+            .'删除未来 '.$result['deleted'].' 条、重新生成 '.$result['created'].' 条记录，'
+            .'之后每周自动生效（已完成的课程保持不变）。';
+
+        if ($result['conflicts']) {
+            $message .= "\n其中 ".count($result['conflicts']).' 条因场地冲突未能生成，请检查：'
+                ."\n".$this->formatConflicts($result['conflicts']);
+        }
+
+        return $message;
+    }
+
+    /**
+     * scope=future 的删除：停用模板 + 取消未来未发生的记录
+     */
+    private function doDeleteFuture(array $data): string
+    {
+        $located = $this->fixedSchedule->locate($data);
+
+        if ($located['need_info'] || ! $located['success'] || ! $located['template']) {
+            return $located['message'];
+        }
+
+        $template = $located['template'];
+        $summary = $template->summary;
+        $result = $this->fixedSchedule->cancelFuture($template);
+
+        return '已取消固定场次「'.$summary.'」，未来 '.$result['cancelled']
+            .' 条记录已取消，之后不再自动生成（历史记录保留）。';
+    }
+
+    /**
+     * 教练姓氏批量改名
+     */
+    private function doRenameCoach(array $data): string
+    {
+        $oldName = trim((string) ($data['old_name'] ?? ''));
+        $newName = trim((string) ($data['new_name'] ?? ''));
+
+        if ($oldName === '' || $newName === '') {
+            return '请告诉我教练原来的名字和新的名字，例如：把孟改成孟宇。';
+        }
+
+        $count = $this->fixedSchedule->renameCoach($oldName, $newName);
+
+        if ($count === 0) {
+            return '没有找到教练「'.$oldName.'」的相关记录，请确认名字是否正确。';
+        }
+
+        return '已把教练「'.$oldName.'」改为「'.$newName.'」，共更新 '.$count.' 条记录（含约课记录、固定场次和学员档案）。';
+    }
+
+    /**
+     * 组装 scope=future 的模板改动数据
+     *
+     * 用户说"改到 11 点"时豆包可能只给 new_data.start_at，这里同步推导 start_time/end_time。
+     *
+     * @return array<string, mixed>
+     */
+    private function buildFutureNewData(array $data): array
+    {
+        $raw = (array) ($data['new_data'] ?? []);
+        $newData = [];
+
+        foreach (['venue', 'coach_name', 'student_name', 'remark', 'start_time', 'end_time'] as $field) {
+            if (! empty($raw[$field])) {
+                $newData[$field] = trim((string) $raw[$field]);
+            } elseif (! empty($data[$field]) && $field !== 'student_name') {
+                $newData[$field] = trim((string) $data[$field]);
+            }
+        }
+
+        // start_at 只在"改了时间"时作为推导依据，避免把某一天的具体日期写成模板时间
+        if (! empty($raw['start_at'])) {
+            try {
+                $start = Carbon::parse((string) $raw['start_at']);
+                $duration = (int) config('doubao.booking.duration_minutes', 60);
+
+                $newData['start_time'] = $newData['start_time'] ?? $start->format('H:i');
+                $newData['end_time'] = $newData['end_time'] ?? $start->copy()->addMinutes($duration)->format('H:i');
+            } catch (\Throwable $e) {
+                // 时间无法解析时忽略，仍按其它字段改模板
+            }
+        }
+
+        return $newData;
+    }
+
+    /**
+     * @param  array<int, array<string, string>>  $conflicts
+     */
+    private function formatConflicts(array $conflicts): string
+    {
+        return collect($conflicts)
+            ->map(fn ($c) => '· '.$c['time'].' '.$c['venue'].' ↔ '.$c['conflict_with'])
+            ->take(5)
+            ->implode("\n");
     }
 
     private function doComplete(array $data): string
@@ -639,7 +793,7 @@ class ChatController extends Controller
      */
     private function maybeGenerateExcel(string $intent): ?array
     {
-        if (! in_array($intent, ['create', 'update', 'delete', 'complete'])) {
+        if (! in_array($intent, ['create', 'update', 'delete', 'complete', 'rename_coach'])) {
             return null;
         }
 

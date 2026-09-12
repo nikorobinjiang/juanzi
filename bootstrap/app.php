@@ -23,6 +23,14 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
             \Illuminate\Session\Middleware\StartSession::class,
         ]);
+
+        // 固定场只提前展开两周：打开页面（含 API）时按机构滚动补齐，未登录请求直接跳过
+        $middleware->web(append: [
+            \App\Http\Middleware\EnsureFixedScheduleWindow::class,
+        ]);
+        $middleware->api(append: [
+            \App\Http\Middleware\EnsureFixedScheduleWindow::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
