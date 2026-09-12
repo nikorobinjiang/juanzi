@@ -11,7 +11,7 @@
  * - venue：开发区单占时用整场「1」「2」（占 1A+1B）；拼场用半场「1A/1B」「2A/2B」；其它区域为 龙安湖/余之城/一小/信达
  * - 拼场：同一天同一片场地时间有交集的场次（含集训/团课与其学员）拆成 A/B 半场，各占一边
  * - exclusive：表内标注「不拼」或用途场（独占场地）；拼场拆分后的条目为 false
- * - is_student：false 表示用途场（裘总用场/阿姨/教练内训/团课/集训/金苑/一小/信达），不建学员档案
+ * - is_student：false 表示用途场（裘总用场/教练内训/团课/集训/金苑/一小/信达），不建学员档案；阿姨是学员（来打球），建档案
  * - 单元格自带时间优先于行标时间；竖向合并单元格按合并范围整段占用
  */
 
@@ -50,7 +50,7 @@ return [
      'coach_name' => '徐', 'exclusive' => false, 'is_student' => true, 'remark' => ''],
     // 周一 19:00-22:00 1 阿姨
     ['region' => '开发区场地', 'venue' => '1', 'weekday' => 1, 'start_time' => '19:00', 'end_time' => '22:00', 'student_name' => '阿姨', 
-     'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => ''],
+     'coach_name' => '', 'exclusive' => true, 'is_student' => true, 'remark' => ''],
     // 周一 19:00-20:00 2 吴忠一家（余）
     ['region' => '开发区场地', 'venue' => '2', 'weekday' => 1, 'start_time' => '19:00', 'end_time' => '20:00', 'student_name' => '吴忠一家', 
      'coach_name' => '余', 'exclusive' => true, 'is_student' => true, 'remark' => ''],
@@ -143,7 +143,7 @@ return [
      'coach_name' => '余', 'exclusive' => false, 'is_student' => true, 'remark' => ''],
     // 周三 19:00-22:00 1 阿姨
     ['region' => '开发区场地', 'venue' => '1', 'weekday' => 3, 'start_time' => '19:00', 'end_time' => '22:00', 'student_name' => '阿姨', 
-     'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => ''],
+     'coach_name' => '', 'exclusive' => true, 'is_student' => true, 'remark' => ''],
     // 周三 19:00-20:00 2 倪文华（孟）
     ['region' => '开发区场地', 'venue' => '2', 'weekday' => 3, 'start_time' => '19:00', 'end_time' => '20:00', 'student_name' => '倪文华', 
      'coach_name' => '孟', 'exclusive' => false, 'is_student' => true, 'remark' => ''],
@@ -230,7 +230,7 @@ return [
      'coach_name' => '余', 'exclusive' => false, 'is_student' => true, 'remark' => ''],
     // 周五 19:00-22:00 1 阿姨
     ['region' => '开发区场地', 'venue' => '1', 'weekday' => 5, 'start_time' => '19:00', 'end_time' => '22:00', 'student_name' => '阿姨', 
-     'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => ''],
+     'coach_name' => '', 'exclusive' => true, 'is_student' => true, 'remark' => ''],
     // 周五 19:00-20:00 2 沈总同（余）
     ['region' => '开发区场地', 'venue' => '2', 'weekday' => 5, 'start_time' => '19:00', 'end_time' => '20:00', 'student_name' => '沈总同', 
      'coach_name' => '余', 'exclusive' => false, 'is_student' => true, 'remark' => ''],
