@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\BookingRecord;
+use App\Models\Student;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 
 /**
  * 约课核心业务：冲突检测、增删改、周分组
@@ -86,8 +88,10 @@ class BookingService
             }
         }
 
+        $studentName = trim((string) ($data['student_name'] ?? ''));
+
         $booking = BookingRecord::create([
-            'student_name' => trim((string) ($data['student_name'] ?? '')),
+            'student_name' => $studentName,
             // 用兜底后的 $coach，避免"冲突检测用兜底值、落库却写空值"的不一致
             'coach_name' => $coach,
             'start_at' => $startAt,
@@ -97,13 +101,82 @@ class BookingService
             'remark' => trim((string) ($data['remark'] ?? '')),
         ]);
 
+        // 约课成功后自动建档：让这位学员出现在「数据概览 → 学员」里（只建档，不累加课时）
+        $profileCreated = $this->ensureStudentProfile($studentName, $coach);
+
+        $message = '约课成功：'.$booking->student_name.'（教练 '.$booking->coach_name.'）'
+            .$booking->start_at->format('m月d日 H:i').' 场地 '.$booking->venue;
+
+        // 仅本次真的新建了档案时提示补手机号，老学员的约课文案保持不变
+        if ($profileCreated) {
+            $message .= '（已自动建立学员档案，如需补手机号，说“'.$studentName.' 手机号13xxxxxxxxx”即可）';
+        }
+
         return [
             'success' => true,
             'booking' => $booking,
             'conflict' => null,
-            'message' => '约课成功：'.$booking->student_name.'（教练 '.$booking->coach_name.'）'
-                .$booking->start_at->format('m月d日 H:i').' 场地 '.$booking->venue,
+            'message' => $message,
         ];
+    }
+
+    /* -----------------------------------------------------------------
+     | 学员档案
+     | ----------------------------------------------------------------- */
+
+    /**
+     * 约课成功后确保学员档案存在（只建档，不累加课时）
+     *
+     * - 课时：新建档案固定 0 节（约课不等于买课，买课时走「安排课时」指令）
+     * - 教练：档案里还没有教练时，用本次约课教练补上；已有教练不覆盖
+     * - 机构：仅在有登录态（能取到机构 code）时建档，避免数据落到错误的机构
+     * - 容错：建档失败只记日志，不影响约课本身（约课已落库，不回滚）
+     *
+     * @param  string  $name  学员姓名（调用方已 trim）
+     * @param  string  $coach 本次约课教练（create() 内已兜底为当前登录用户）
+     * @return bool 本次是否新建了档案（用于决定是否追加手机号补充提示）
+     */
+    private function ensureStudentProfile(string $name, string $coach = ''): bool
+    {
+        if ($name === '') {
+            return false;
+        }
+
+        // 无登录态（CLI / 未认证请求）拿不到机构，直接跳过，避免跨机构误匹配同名学员
+        $organizationCode = (string) (auth('web')->user()?->organization_code ?? '');
+        if ($organizationCode === '') {
+            return false;
+        }
+
+        try {
+            /** @var Student $student */
+            $student = Student::firstOrNew(['name' => $name]);
+            $created = ! $student->exists;
+
+            if ($created) {
+                $student->organization_code = $organizationCode;
+                $student->lessons_total = 0;
+                $student->remark = '约课自动建档';
+            }
+
+            if ($coach !== '' && (string) $student->coach_name === '') {
+                $student->coach_name = $coach;
+            }
+
+            // 已有档案且无需回填教练时不写库
+            if ($created || $student->isDirty()) {
+                $student->save();
+            }
+
+            return $created;
+        } catch (\Throwable $e) {
+            Log::warning('约课自动建档失败', [
+                'student_name' => $name,
+                'error' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /* -----------------------------------------------------------------
