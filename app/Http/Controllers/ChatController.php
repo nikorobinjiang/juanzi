@@ -311,7 +311,9 @@ class ChatController extends Controller
                 break;
 
             default:
-                $reply = $parsed['reply'] ?? '好的，收到！';
+                // 模型没识别出意图（或只回一句「好的，收到！」）时兜底：
+                // 「场地有没有空」这类问题本地按约课记录直接算，避免没有信息量的回复
+                $reply = $this->safeQueryReply($text, (string) ($parsed['reply'] ?? ''), $bookingsJson);
         }
 
         // 生成最新 Excel（约课有变动时）
@@ -596,10 +598,13 @@ class ChatController extends Controller
             'schedule' => $this->querySchedule($data),
             'coach_availability' => $this->queryCoachAvailability($data),
             'venue_availability' => $this->queryVenueAvailability($data),
-            // general：复用 parseBookingAction 时豆包已生成的完整回答，避免第二次串行调用（省一半等待时间）
-            default => trim($aiReply) !== ''
-                ? $aiReply
-                : $this->doubao->answerQuery((string) ($data['question'] ?? $fallbackText), $bookingsJson),
+            // general：复用 parseBookingAction 时豆包已生成的完整回答，避免第二次串行调用（省一半等待时间）；
+            // 回答为空或只有「好的，收到！」时再兜底（场地空闲本地直接算）
+            default => $this->safeQueryReply(
+                trim((string) ($data['question'] ?? '')) !== '' ? (string) $data['question'] : $fallbackText,
+                $aiReply,
+                $bookingsJson
+            ),
         };
     }
 
@@ -684,13 +689,208 @@ class ChatController extends Controller
     private function queryVenueAvailability(array $data): string
     {
         $venue = trim((string) ($data['venue'] ?? ''));
-        if ($venue === '') {
-            return '你想查哪个场地有没有空呢？（1A / 1B / 2A / 2B）';
-        }
-
         [$from, $to] = $this->queryDateRange($data);
 
+        // 用户问「所有/全部空闲场地」时 venue 为空：直接列全部场地，不再反问
+        if ($venue === '') {
+            return $this->allVenuesAvailability($from, $to);
+        }
+
         return $this->formatAvailability($venue.' 场地', $this->booking->venueAvailability($venue, $from, $to));
+    }
+
+    /**
+     * 全部场地的空闲时段（用户问「所有/全部空闲场地」时）
+     */
+    private function allVenuesAvailability(Carbon $from, Carbon $to): string
+    {
+        // 开发区整场（1/2，占用含 A+B 两个半场）排前面，再到半场与其它区域场地
+        $venues = array_values(array_unique(array_merge(
+            ['1', '1A', '1B', '2', '2A', '2B'],
+            (array) config('doubao.booking.venues', [])
+        )));
+
+        $single = $from->isSameDay($to);
+        $lines = [];
+
+        foreach ($venues as $venue) {
+            $days = $this->booking->venueAvailability($venue, $from, $to);
+
+            if ($single) {
+                $slots = $this->mergeSlots((array) ($days[0]['slots'] ?? []));
+                $lines[] = '· '.$venue.'：'.($slots ? implode('、', $slots) : '全天无空闲');
+
+                continue;
+            }
+
+            $lines[] = '· '.$venue.'：';
+            foreach ($days as $day) {
+                $slots = $this->mergeSlots((array) ($day['slots'] ?? []));
+                $lines[] = '  '.$this->dayLabel(Carbon::parse($day['date'])).'：'
+                    .($slots ? implode('、', $slots) : '无空闲');
+            }
+        }
+
+        $head = $single
+            ? $this->dayLabel($from).'各场地空闲时段'
+            : $from->format('n月j日').'至'.$to->format('n月j日').'各场地空闲时段';
+
+        return $head.'：'."\n".implode("\n", $lines);
+    }
+
+    /**
+     * 日期标签：今天（9月14日 周一）/ 明天（9月15日 周二）/ 9月20日 周日
+     */
+    private function dayLabel(Carbon $day): string
+    {
+        $today = Carbon::today('Asia/Shanghai');
+        $prefix = match (true) {
+            $day->isSameDay($today) => '今天',
+            $day->isSameDay($today->copy()->addDay()) => '明天',
+            $day->isSameDay($today->copy()->addDays(2)) => '后天',
+            default => '',
+        };
+
+        $weekday = '周'.['日', '一', '二', '三', '四', '五', '六'][(int) $day->dayOfWeek];
+
+        return $prefix !== ''
+            ? $prefix.'（'.$day->format('n月j日').' '.$weekday.'）'
+            : $day->format('n月j日').' '.$weekday;
+    }
+
+    /**
+     * 合并连续时段：08:00-09:00、09:00-10:00 → 08:00-10:00
+     *
+     * @param  array<int, string>  $slots
+     * @return array<int, string>
+     */
+    private function mergeSlots(array $slots): array
+    {
+        $merged = [];
+
+        foreach ($slots as $slot) {
+            $parts = explode('-', (string) $slot);
+            if (count($parts) !== 2) {
+                continue;
+            }
+
+            $last = array_key_last($merged);
+            if ($last !== null && $merged[$last][1] === $parts[0]) {
+                $merged[$last][1] = $parts[1];
+
+                continue;
+            }
+
+            $merged[] = [$parts[0], $parts[1]];
+        }
+
+        return array_map(fn (array $r) => $r[0].'-'.$r[1], $merged);
+    }
+
+    /**
+     * 是否「有没有空」类问题（模型分类不可靠时也能答）
+     */
+    private function looksLikeAvailabilityQuestion(string $text): bool
+    {
+        if (preg_match('/空闲|有空|空场|可约|有哪些空|没课/u', $text) === 1) {
+            return true;
+        }
+
+        return preg_match('/场地|球场|球馆|1A|1B|2A|2B|号场/u', $text) === 1
+            && preg_match('/查询|查一下|查查|看看|情况|怎么样/u', $text) === 1;
+    }
+
+    /**
+     * 从文本里猜场地：1A/1B/2A/2B →「场地1」「1号场」→ 其它区域场地
+     */
+    private function guessVenueFromText(string $text): string
+    {
+        if (preg_match('/(1A|1B|2A|2B)/iu', $text, $m) === 1) {
+            return strtoupper($m[1]);
+        }
+
+        if (preg_match('/(?:场地|球场|号场)\s*([12])/u', $text, $m) === 1
+            || preg_match('/([12])\s*号(?:场|场地)?/u', $text, $m) === 1) {
+            return $m[1];
+        }
+
+        foreach (['龙安湖', '余之城', '一小', '信达', '教育学院'] as $venue) {
+            if (mb_strpos($text, $venue) !== false) {
+                return $venue;
+            }
+        }
+
+        return '';
+    }
+
+    /**
+     * 从文本里猜查询日期（默认今天到明天）
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function guessDateRange(string $text): array
+    {
+        $today = Carbon::today('Asia/Shanghai');
+
+        if (str_contains($text, '后天')) {
+            return [$today->copy()->addDays(2), $today->copy()->addDays(2)];
+        }
+        if (str_contains($text, '明天')) {
+            return [$today->copy()->addDay(), $today->copy()->addDay()];
+        }
+        if (str_contains($text, '今天')) {
+            return [$today->copy(), $today->copy()];
+        }
+
+        $nextWeek = str_contains($text, '下下周') ? 2 : (str_contains($text, '下周') ? 1 : 0);
+        if (preg_match('/(?:周|星期)([一二三四五六日天1-7])/u', $text, $m) === 1) {
+            $index = ['一' => 1, '二' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '日' => 7, '天' => 7][$m[1]]
+                ?? (int) $m[1];
+
+            if ($index >= 1 && $index <= 7) {
+                $day = $today->copy()->startOfWeek(Carbon::MONDAY)->addWeeks($nextWeek)->addDays($index - 1);
+
+                return [$day, $day];
+            }
+        }
+
+        return [$today->copy(), $today->copy()->addDay()];
+    }
+
+    /**
+     * 模型没给出有效回答时的兜底
+     *
+     * - 「场地有没有空」：本地按约课记录算，稳定、即时，不依赖模型分类
+     * - 其它问题：让豆包基于约课数据直接答一次
+     * - 都不行就沿用模型原话
+     */
+    private function safeQueryReply(string $text, string $aiReply, string $bookingsJson): string
+    {
+        $aiReply = trim($aiReply);
+        $lame = $aiReply === ''
+            || (mb_strlen($aiReply) <= 12 && preg_match('/^(好的|好嘞|收到|明白|了解|ok)/iu', $aiReply) === 1);
+
+        if (! $lame) {
+            return $aiReply;
+        }
+
+        // 问「场地有没有空」→ 本地按记录算；问教练的走下面的豆包问答（教练名本地不好猜）
+        if ($this->looksLikeAvailabilityQuestion($text) && ! str_contains($text, '教练')) {
+            [$from, $to] = $this->guessDateRange($text);
+            $venue = $this->guessVenueFromText($text);
+
+            return $venue !== ''
+                ? $this->formatAvailability($venue.' 场地', $this->booking->venueAvailability($venue, $from, $to))
+                : $this->allVenuesAvailability($from, $to);
+        }
+
+        try {
+            return $this->doubao->answerQuery($text, $bookingsJson);
+        } catch (\Throwable $e) {
+            Log::warning('查询兜底失败', ['error' => $e->getMessage()]);
+
+            return $aiReply !== '' ? $aiReply : '这条我没太理解，可以换个说法吗？（例如：1A 场地明天有空吗）';
+        }
     }
 
     /**
@@ -758,11 +958,11 @@ class ChatController extends Controller
 
         foreach ($days as $day) {
             $date = Carbon::parse($day['date']);
-            $label = $date->isToday('Asia/Shanghai') ? '今天' : $date->format('n月j日');
+            $slots = $this->mergeSlots((array) ($day['slots'] ?? []));
 
-            $lines[] = $day['slots']
-                ? $label.'空闲时段：'.implode('、', $day['slots'])
-                : $label.'没有空闲时段';
+            $lines[] = $slots
+                ? $this->dayLabel($date).'空闲时段：'.implode('、', $slots)
+                : $this->dayLabel($date).'没有空闲时段';
         }
 
         return $who.'：'."\n".implode("\n", $lines);

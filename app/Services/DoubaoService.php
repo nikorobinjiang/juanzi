@@ -175,7 +175,7 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
 - next     —— 下一次课是什么时候（如"下次课/下一次什么时候上课"）
 - schedule —— 某学员/教练的排课安排（如"我什么时候上课/他这周有哪些课/课表"）
 - coach_availability —— 教练空闲查询（如"张教练今天有空吗/明天有没有课"）
-- venue_availability —— 场地空闲查询（如"1A场地明天有空吗"）
+- venue_availability —— 场地空闲查询（如"1A场地明天有空吗"、"明天有哪些空场"；问"所有/全部场地"时 venue 留空，系统会列出所有场地）
 - general  —— 其他开放问题（无法归入以上类型时）
 
 你必须返回 JSON，格式如下：
@@ -235,6 +235,8 @@ query 意图的参数规则（非常重要）：
 - 空闲查询（coach_availability/venue_availability）：date_from/date_to 默认今天到明天，用户提到具体日期再覆盖
 - 计数/最近课程/排课查询：能提取到学员或教练就如实填，提取不到填空字符串，不要猜
 - "教练什么时候有空"这类问题，教练姓名填到 coach_name；"场地有空"则场地名填到 venue
+- 场地/教练是否空闲、有哪些空场，一律用 intent=query + query_type=venue_availability / coach_availability，不要归到 general，也不要给 create
+- query 意图的 reply 必须写出结论（如"1A 明天 08:00-18:00 空闲"），禁止「好的，收到！」这类没有信息量的回复
 - 场地查询同时支持半场 1A/1B/2A/2B 与整场 1/2，整场 1 = 1A+1B（整场被占用时 1A/1B 都不可约，反之亦然）；其它区域场地填 龙安湖/余之城/一小/信达/教育学院
 - general 类型（开放问题/闲聊）：reply 字段直接给出完整、口语化的最终回答（1-3 句话，可引用约课 JSON 数据作答，不要编造），此时 reply 不是概括句而是最终答案
 
