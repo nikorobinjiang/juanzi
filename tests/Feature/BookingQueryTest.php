@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\BookingRecord;
+use App\Models\User;
 use App\Services\BookingService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -17,6 +18,14 @@ class BookingQueryTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // booking_records.organization_code 非空，需要一个登录用户来写入机构码
+        $this->actingAs(User::create([
+            'name' => 'coach_a',
+            'username' => 'coach_a',
+            'password' => 'secret123',
+            'organization_code' => 'tennis_a',
+        ]));
 
         $this->booking = app(BookingService::class);
     }
@@ -89,20 +98,20 @@ class BookingQueryTest extends TestCase
         $this->assertNotContains('10:00-11:00', $days[0]['slots']);
     }
 
-    /** 场地空闲时段：按场地独立计算，互不影响 */
+    /** 场地空闲时段：按"已占用区间求补集"输出真实连续空闲段，场地之间互不影响 */
     public function test_venue_availability_excludes_occupied_slots(): void
     {
-        $this->makeBooking(['venue' => '1B', 'start_at' => Carbon::today()->setTime(14, 0)]);
+        // 用未来某天，避免"今天已过时段"影响断言
+        $day = Carbon::today()->addDays(2);
+        $this->makeBooking(['venue' => '1B', 'start_at' => $day->copy()->setTime(14, 0)]);
 
-        $days = $this->booking->venueAvailability('1B', Carbon::today(), Carbon::today());
+        $days = $this->booking->venueAvailability('1B', $day, $day);
 
-        $this->assertNotContains('14:00-15:00', $days[0]['slots']);
-        $this->assertContains('13:00-14:00', $days[0]['slots']);
-        $this->assertContains('15:00-16:00', $days[0]['slots']);
+        $this->assertSame(['07:00-14:00', '15:00-23:00'], $days[0]['slots']);
 
-        // 其他场地不受影响
-        $other = $this->booking->venueAvailability('1A', Carbon::today(), Carbon::today());
-        $this->assertContains('14:00-15:00', $other[0]['slots']);
+        // 其他场地不受影响：整天都空
+        $other = $this->booking->venueAvailability('1A', $day, $day);
+        $this->assertSame(['07:00-23:00'], $other[0]['slots']);
     }
 
     /** 教练冲突检测：重叠判冲突、紧邻不冲突、可忽略自身 */

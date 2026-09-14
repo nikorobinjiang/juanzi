@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessBookingImage;
 use App\Models\BookingRecord;
+use App\Support\QueryDateRange;
 use App\Models\GeneratedImage;
 use App\Models\Message;
 use App\Services\BookingService;
@@ -11,6 +12,7 @@ use App\Services\CrmService;
 use App\Services\DoubaoService;
 use App\Services\ExcelService;
 use App\Services\FixedScheduleService;
+use App\Services\VenueAvailabilityService;
 use Carbon\Carbon;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,6 +43,7 @@ class ChatController extends Controller
         private readonly CrmService $crm,
         private readonly ExcelService $excel,
         private readonly FixedScheduleService $fixedSchedule,
+        private readonly VenueAvailabilityService $venues,
     ) {}
 
     /**
@@ -595,9 +598,9 @@ class ChatController extends Controller
             'count' => $this->queryCount($data),
             'last' => $this->queryLast($data),
             'next' => $this->queryNext($data),
-            'schedule' => $this->querySchedule($data),
-            'coach_availability' => $this->queryCoachAvailability($data),
-            'venue_availability' => $this->queryVenueAvailability($data),
+            'schedule' => $this->querySchedule($data, $fallbackText),
+            'coach_availability' => $this->queryCoachAvailability($data, $fallbackText),
+            'venue_availability' => $this->queryVenueAvailability($data, $fallbackText),
             // general：复用 parseBookingAction 时豆包已生成的完整回答，避免第二次串行调用（省一半等待时间）；
             // 回答为空或只有「好的，收到！」时再兜底（场地空闲本地直接算）
             default => $this->safeQueryReply(
@@ -652,14 +655,14 @@ class ChatController extends Controller
             .'（'.$next->venue.' 场地 · 教练 '.$next->coach_name.'）。';
     }
 
-    private function querySchedule(array $data): string
+    private function querySchedule(array $data, string $userText = ''): string
     {
         [$student, $coach] = $this->subject($data);
         if ($student === '' && $coach === '') {
             return '你想查谁的排课呢？告诉我学员或教练的名字吧。';
         }
 
-        [$from, $to] = $this->queryDateRange($data);
+        [$from, $to] = $this->resolveDateRange($data, $userText);
         $list = $this->booking->schedule($student, $coach, $from, $to);
 
         if ($list->isEmpty()) {
@@ -674,68 +677,86 @@ class ChatController extends Controller
             ->implode("\n");
     }
 
-    private function queryCoachAvailability(array $data): string
+    private function queryCoachAvailability(array $data, string $userText = ''): string
     {
         $coach = trim((string) ($data['coach_name'] ?? ''));
         if ($coach === '') {
             return '你想查哪位教练有没有空呢？告诉我教练的名字吧。';
         }
 
-        [$from, $to] = $this->queryDateRange($data);
+        [$from, $to] = $this->resolveDateRange($data, $userText);
 
         return $this->formatAvailability('教练 '.$coach, $this->booking->coachAvailability($coach, $from, $to));
     }
 
-    private function queryVenueAvailability(array $data): string
+    private function queryVenueAvailability(array $data, string $userText = ''): string
     {
         $venue = trim((string) ($data['venue'] ?? ''));
-        [$from, $to] = $this->queryDateRange($data);
+        [$from, $to] = $this->resolveDateRange($data, $userText);
 
-        // 用户问「所有/全部空闲场地」时 venue 为空：直接列全部场地，不再反问
+        // 用户问「所有/全部空闲场地」时 venue 为空：列出开发区全部可约单元，不再反问
         if ($venue === '') {
             return $this->allVenuesAvailability($from, $to);
         }
 
-        return $this->formatAvailability($venue.' 场地', $this->booking->venueAvailability($venue, $from, $to));
+        return $this->formatAvailability(
+            $this->venueLabel($venue),
+            $this->venues->slotsForVenue($venue, $from, $to)
+        );
     }
 
     /**
-     * 全部场地的空闲时段（用户问「所有/全部空闲场地」时）
+     * 开发区全部可约单元的空闲时段（用户问「查询当天空闲场地 / 有哪些空场」时）
+     *
+     * 每个单元一行：整场（不拼）在前，两个可拼半场紧随其后。
+     * 整场的可约时段由两个半场派生（1A 与 1B 同时空闲的时段整场才可约）。
      */
     private function allVenuesAvailability(Carbon $from, Carbon $to): string
     {
-        // 开发区整场（1/2，占用含 A+B 两个半场）排前面，再到半场与其它区域场地
-        $venues = array_values(array_unique(array_merge(
-            ['1', '1A', '1B', '2', '2A', '2B'],
-            (array) config('doubao.booking.venues', [])
-        )));
+        $units = $this->venues->developmentUnits();
+        $slots = $this->venues->slotsFor($units, $from, $to);
 
         $single = $from->isSameDay($to);
         $lines = [];
 
-        foreach ($venues as $venue) {
-            $days = $this->booking->venueAvailability($venue, $from, $to);
+        foreach ($units as $unit) {
+            $days = (array) ($slots[$unit] ?? []);
 
             if ($single) {
-                $slots = $this->mergeSlots((array) ($days[0]['slots'] ?? []));
-                $lines[] = '· '.$venue.'：'.($slots ? implode('、', $slots) : '全天无空闲');
+                $free = (array) ($days[0]['slots'] ?? []);
+                $lines[] = '· '.$this->venueLabel($unit).'：'
+                    .($free ? implode('、', $free) : '没有空闲时段');
 
                 continue;
             }
 
-            $lines[] = '· '.$venue.'：';
+            $lines[] = '· '.$this->venueLabel($unit).'：';
             foreach ($days as $day) {
-                $slots = $this->mergeSlots((array) ($day['slots'] ?? []));
-                $lines[] = '  '.$this->dayLabel(Carbon::parse($day['date'])).'：'
-                    .($slots ? implode('、', $slots) : '无空闲');
+                $free = (array) ($day['slots'] ?? []);
+                $lines[] = '  '.$this->dayLabel(Carbon::parse((string) $day['date'])).'：'
+                    .($free ? implode('、', $free) : '没有空闲时段');
             }
         }
 
         $head = $single
-            ? $this->dayLabel($from).'各场地空闲时段'
-            : $from->format('n月j日').'至'.$to->format('n月j日').'各场地空闲时段';
+            ? $this->dayLabel($from).'场地空闲情况'
+            : $from->format('n月j日').'至'.$to->format('n月j日').'场地空闲情况';
 
         return $head.'：'."\n".implode("\n", $lines);
+    }
+
+    /**
+     * 可约单元的展示名：整场标「不拼」，半场标「可拼」
+     */
+    private function venueLabel(string $unit): string
+    {
+        return match ($unit) {
+            '1' => '1（整场·不拼）',
+            '2' => '2（整场·不拼）',
+            '1A', '1B' => $unit.'（1 号半场·可拼）',
+            '2A', '2B' => $unit.'（2 号半场·可拼）',
+            default => $unit.' 场地',
+        };
     }
 
     /**
@@ -826,35 +847,15 @@ class ChatController extends Controller
     /**
      * 从文本里猜查询日期（默认今天到明天）
      *
+     * 与 QueryDateRange 共用同一套日期词口径，区别只在"猜不到时"的默认范围。
+     *
      * @return array{0: Carbon, 1: Carbon}
      */
     private function guessDateRange(string $text): array
     {
         $today = Carbon::today('Asia/Shanghai');
 
-        if (str_contains($text, '后天')) {
-            return [$today->copy()->addDays(2), $today->copy()->addDays(2)];
-        }
-        if (str_contains($text, '明天')) {
-            return [$today->copy()->addDay(), $today->copy()->addDay()];
-        }
-        if (str_contains($text, '今天')) {
-            return [$today->copy(), $today->copy()];
-        }
-
-        $nextWeek = str_contains($text, '下下周') ? 2 : (str_contains($text, '下周') ? 1 : 0);
-        if (preg_match('/(?:周|星期)([一二三四五六日天1-7])/u', $text, $m) === 1) {
-            $index = ['一' => 1, '二' => 2, '三' => 3, '四' => 4, '五' => 5, '六' => 6, '日' => 7, '天' => 7][$m[1]]
-                ?? (int) $m[1];
-
-            if ($index >= 1 && $index <= 7) {
-                $day = $today->copy()->startOfWeek(Carbon::MONDAY)->addWeeks($nextWeek)->addDays($index - 1);
-
-                return [$day, $day];
-            }
-        }
-
-        return [$today->copy(), $today->copy()->addDay()];
+        return QueryDateRange::fromText($text) ?? [$today->copy(), $today->copy()->addDay()];
     }
 
     /**
@@ -880,7 +881,7 @@ class ChatController extends Controller
             $venue = $this->guessVenueFromText($text);
 
             return $venue !== ''
-                ? $this->formatAvailability($venue.' 场地', $this->booking->venueAvailability($venue, $from, $to))
+                ? $this->formatAvailability($this->venueLabel($venue), $this->venues->slotsForVenue($venue, $from, $to))
                 : $this->allVenuesAvailability($from, $to);
         }
 
@@ -945,6 +946,19 @@ class ChatController extends Controller
         }
 
         return [$from, $to];
+    }
+
+    /**
+     * 查询日期范围：用户文本里的日期词优先本地解析
+     *
+     * 模型推算星期会出错（实测"本周三"被算成次日 9月17日 周四），所以只要文本里
+     * 出现明确日期词就以 QueryDateRange 的结果为准；文本没说日期才用模型给的 date_from/date_to。
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function resolveDateRange(array $data, string $userText): array
+    {
+        return QueryDateRange::fromText($userText) ?? $this->queryDateRange($data);
     }
 
     /**

@@ -63,9 +63,9 @@ return [
     // 周二 10:00-12:00 1 教练内训
     ['region' => '开发区场地', 'venue' => '1', 'weekday' => 2, 'start_time' => '10:00', 'end_time' => '12:00', 'student_name' => '教练内训', 
      'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => ''],
-    // 周二 12:00-16:00 1 裘总用场
-    ['region' => '开发区场地', 'venue' => '1', 'weekday' => 2, 'start_time' => '12:00', 'end_time' => '16:00', 'student_name' => '裘总用场', 
-     'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => '12-13周例会'],
+    // 周二 12:00-16:00 1 例会
+    ['region' => '开发区场地', 'venue' => '1', 'weekday' => 2, 'start_time' => '12:00', 'end_time' => '16:00', 'student_name' => '例会', 
+     'coach_name' => '', 'exclusive' => true, 'is_student' => false, 'remark' => ''],
     // 周二 17:00-18:00 1 庞丽萍，边萍霞（黎）
     ['region' => '开发区场地', 'venue' => '1', 'weekday' => 2, 'start_time' => '17:00', 'end_time' => '18:00', 'student_name' => '庞丽萍，边萍霞', 
      'coach_name' => '黎', 'exclusive' => false, 'is_student' => true, 'remark' => ''],

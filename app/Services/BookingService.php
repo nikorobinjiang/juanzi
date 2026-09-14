@@ -6,6 +6,7 @@ use App\Models\BookingRecord;
 use App\Models\FixedSchedule;
 use App\Support\BookingWindow;
 use App\Support\FixedSchedulePrecheck;
+use App\Support\VenueSlots;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
 
@@ -20,16 +21,18 @@ class BookingService
     /** 自动分配候选场地（通常为 1A/1B/2A/2B 半场） */
     private array $venues;
 
-    /** 整场 → 半场映射：['1' => ['1A', '1B'], '2' => ['2A', '2B']] */
-    private array $fullCourts;
+    /** 场地空闲查询 */
+    private readonly VenueAvailabilityService $availability;
 
-    public function __construct(private readonly FixedSchedulePrecheck $precheck = new FixedSchedulePrecheck)
-    {
+    public function __construct(
+        private readonly FixedSchedulePrecheck $precheck = new FixedSchedulePrecheck,
+        ?VenueAvailabilityService $availability = null,
+    ) {
         $this->venues = (array) config(
             'doubao.booking.auto_assign_venues',
             config('doubao.booking.venues', ['1A', '1B', '2A', '2B'])
         );
-        $this->fullCourts = (array) config('doubao.booking.full_courts', []);
+        $this->availability = $availability ?? new VenueAvailabilityService;
     }
 
     /**
@@ -39,29 +42,13 @@ class BookingService
      * - 1A → ['1A', '1']       （1 号整场被占时，1A 也不可约）
      * - 其它区域场地 → 仅自身
      *
+     * 实现下沉到 VenueSlots，与场地空闲查询共用同一套互斥规则。
+     *
      * @return array<int, string>
      */
     public function venueSlots(string $venue): array
     {
-        $venue = trim($venue);
-
-        if ($venue === '') {
-            return [];
-        }
-
-        // 整场：展开出两个半场
-        if (isset($this->fullCourts[$venue])) {
-            return array_values(array_unique(array_merge([$venue], (array) $this->fullCourts[$venue])));
-        }
-
-        // 半场：关联其所属整场（整场被占用时半场同样不可约）
-        foreach ($this->fullCourts as $full => $halves) {
-            if (in_array($venue, (array) $halves, true)) {
-                return array_values(array_unique(array_merge([$venue, (string) $full])));
-            }
-        }
-
-        return [$venue];
+        return VenueSlots::of($venue);
     }
 
     /* -----------------------------------------------------------------
@@ -463,7 +450,7 @@ class BookingService
      */
     public function coachAvailability(string $coach, Carbon $from, Carbon $to): array
     {
-        return $this->buildAvailability($from, $to, BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
+        return $this->buildGridAvailability($from, $to, BookingRecord::where('coach_name', 'like', '%'.$coach.'%')
             ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
             ->where('start_at', '<', $to->copy()->addDay())
             ->where('end_at', '>', $from)
@@ -473,29 +460,28 @@ class BookingService
     /**
      * 场地空闲时段：from 到 to（含）按天输出营业时段内的空闲段
      *
+     * 实现见 VenueAvailabilityService（区间补集 + 整场/半场派生）。
+     *
      * @return array<int, array{date: string, slots: array<int, string>}>
      */
     public function venueAvailability(string $venue, Carbon $from, Carbon $to): array
     {
-        // 整场/半场互斥：查 1 号场地时把 1A/1B 的占用也计入；查 1A 时也计入整场 1
-        return $this->buildAvailability($from, $to, BookingRecord::whereIn('venue', $this->venueSlots($venue))
-            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
-            ->where('start_at', '<', $to->copy()->addDay())
-            ->where('end_at', '>', $from)
-            ->get());
+        return $this->availability->slotsForVenue($venue, $from, $to);
     }
 
     /**
-     * 生成空闲时段列表：每天按营业时间（hours.start ~ hours.end，每 duration 一段），
+     * 教练空闲时段：每天按营业时间（hours.start ~ hours.end，每 duration 一段），
      * 与给定已占用记录时间段重叠的时段视为忙碌。
+     *
+     * 教练按"整节课"排课，用整点网格输出更符合询问习惯（"10 点有空吗"）。
      *
      * @param  Collection<int, BookingRecord>  $booked
      * @return array<int, array{date: string, slots: array<int, string>}>
      */
-    private function buildAvailability(Carbon $from, Carbon $to, Collection $booked): array
+    private function buildGridAvailability(Carbon $from, Carbon $to, Collection $booked): array
     {
-        $startHour = (int) config('doubao.booking.hours.start', 8);
-        $endHour = (int) config('doubao.booking.hours.end', 22);
+        $startHour = (int) config('doubao.booking.hours.start', 7);
+        $endHour = (int) config('doubao.booking.hours.end', 23);
         $duration = max(60, (int) config('doubao.booking.duration_minutes', 60));
         $stepHours = max(1, (int) round($duration / 60));
 

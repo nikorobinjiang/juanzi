@@ -140,18 +140,18 @@ class BookingVenueExclusiveTest extends TestCase
         ]);
 
         $day = Carbon::now('Asia/Shanghai')->addDays(2);
-        $slots = collect($this->booking->venueAvailability('1', $day, $day))->first()['slots'];
 
-        $this->assertNotContains('10:00-11:00', $slots);
-        $this->assertContains('11:00-12:00', $slots);
+        // 约了 1A → 整场 1 在该时段不可约（其余时段仍可约）
+        $slots = collect($this->booking->venueAvailability('1', $day, $day))->first()['slots'];
+        $this->assertSame(['07:00-10:00', '11:00-23:00'], $slots);
 
         // 2 号整场不受影响
         $courts = collect($this->booking->venueAvailability('2', $day, $day))->first()['slots'];
-        $this->assertContains('10:00-11:00', $courts);
+        $this->assertSame(['07:00-23:00'], $courts);
 
         // 1B 不受 1A 占用影响（1A 与 1B 之间不互斥）
         $halfSlots = collect($this->booking->venueAvailability('1B', $day, $day))->first()['slots'];
-        $this->assertContains('10:00-11:00', $halfSlots);
+        $this->assertSame(['07:00-23:00'], $halfSlots);
 
         // 记录确实落在 1A
         $this->assertSame('1A', BookingRecord::first()->venue);
