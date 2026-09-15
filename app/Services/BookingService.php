@@ -69,6 +69,20 @@ class BookingService
         $venue = trim((string) ($data['venue'] ?? ''));
         $coach = trim((string) ($data['coach_name'] ?? ''));
 
+        // 入参校验：指定了场地就必须在白名单内；时间必须落在营业时段内
+        // （自动分配的候选场地来自配置，天然合法，不需要再校验）
+        if ($venue !== '') {
+            $error = $this->validateVenue($venue);
+            if ($error !== '') {
+                return ['success' => false, 'booking' => null, 'conflict' => null, 'message' => $error];
+            }
+        }
+
+        $error = $this->validateOpeningHours($startAt, $endAt);
+        if ($error !== '') {
+            return ['success' => false, 'booking' => null, 'conflict' => null, 'message' => $error];
+        }
+
         // 未指定教练时，默认由当前登录用户（教练）带课；用户明确说出教练名时不覆盖
         if ($coach === '') {
             $coach = trim((string) (auth('web')->user()?->name ?? ''));
@@ -103,7 +117,8 @@ class BookingService
                     'success' => false,
                     'booking' => null,
                     'conflict' => null,
-                    'message' => '抱歉，'.$startAt->format('m月d日 H:i').' 四个场地（1A/1B/2A/2B）都有约了，请换个时间。',
+                    'message' => '抱歉，'.$startAt->format('m月d日 H:i').' '.implode('/', $this->venues)
+                        .' 都有约了，请换个时间。',
                 ];
             }
         } else {
@@ -153,8 +168,54 @@ class BookingService
     }
 
     /* -----------------------------------------------------------------
-     | 学员档案
-     | ----------------------------------------------------------------- */
+    | 入参校验
+    | ----------------------------------------------------------------- */
+
+    /**
+     * 场地白名单校验：只认 config('doubao.booking.venues') 里登记的场地
+     *
+     * 防止「3 号场地」这类随口说的场地被原样写进 booking_records
+     * （VenueSlots::of() 对未登记场地只返回自身，冲突检测什么也查不到）。
+     *
+     * @return string 错误信息；空串表示通过
+     */
+    private function validateVenue(string $venue): string
+    {
+        $venues = array_map('strval', (array) config('doubao.booking.venues', []));
+
+        if (! in_array($venue, $venues, true)) {
+            return '场地「'.$venue.'」不存在，可选场地：'.implode('、', $venues);
+        }
+
+        return '';
+    }
+
+    /**
+     * 营业时段校验：整节课都要落在 config('doubao.booking.hours') 之内
+     *
+     * 固定课表由 FixedScheduleService 直接展开，不经过这里，所以不受影响。
+     *
+     * @return string 错误信息；空串表示通过
+     */
+    private function validateOpeningHours(Carbon $startAt, Carbon $endAt): string
+    {
+        $openHour = (int) config('doubao.booking.hours.start', 7);
+        $closeHour = (int) config('doubao.booking.hours.end', 23);
+
+        $openStart = $startAt->copy()->setTime($openHour, 0);
+        $openEnd = $startAt->copy()->setTime($closeHour, 0);
+
+        if ($startAt->lt($openStart) || $endAt->gt($openEnd)) {
+            return '场地开放时间是 '.sprintf('%02d:00', $openHour).'-'.sprintf('%02d:00', $closeHour)
+                .'，'.$startAt->format('H:i').'-'.$endAt->format('H:i').' 不在开放时段内，请换个时间';
+        }
+
+        return '';
+    }
+
+    /* -----------------------------------------------------------------
+    | 学员档案
+    | ----------------------------------------------------------------- */
 
     /**
      * 约课成功后确保学员档案存在（只建档，不累加课时）
@@ -204,6 +265,22 @@ class BookingService
         $timeChanged = $newStartAt->ne($booking->start_at);
         $venueChanged = $newVenue !== $booking->venue;
         $coachChanged = $newCoach !== $booking->coach_name;
+
+        // 与 create() 同口径的入参校验：只在字段真的被改动时校验，
+        // 避免历史脏数据（如早期写进来的未登记场地）卡住其它合法修改
+        if ($venueChanged) {
+            $error = $this->validateVenue($newVenue);
+            if ($error !== '') {
+                return ['success' => false, 'booking' => $booking, 'message' => '修改失败，'.$error];
+            }
+        }
+
+        if ($timeChanged) {
+            $error = $this->validateOpeningHours($newStartAt, $newEndAt);
+            if ($error !== '') {
+                return ['success' => false, 'booking' => $booking, 'message' => '修改失败，'.$error];
+            }
+        }
 
         // 时间或场地变化 → 场地冲突检测
         if ($timeChanged || $venueChanged) {
