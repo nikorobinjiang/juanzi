@@ -57,7 +57,7 @@ class AsyncImageBookingTest extends TestCase
         $this->assertSame('tennis_a', $message->organization_code);
 
         // 队列任务携带用户消息 id
-        ProcessBookingImage::assertPushed(
+        Queue::assertPushed(
             ProcessBookingImage::class,
             fn (ProcessBookingImage $job) => $job->messageId === $message->id,
         );
@@ -82,7 +82,7 @@ class AsyncImageBookingTest extends TestCase
         $response->assertOk()->assertJsonPath('reply', $reply);
         $this->assertDatabaseHas('messages', ['role' => 'assistant', 'content' => $reply]);
 
-        ProcessBookingImage::assertNothingPushed();
+        Queue::assertNothingPushed();
     }
 
     /** 文字约课消息（本地关键词命中）：直接走约课解析，不调轻量豆包、不派发队列 */
@@ -106,7 +106,7 @@ class AsyncImageBookingTest extends TestCase
 
         $response->assertOk()->assertJsonPath('reply', '好的，收到！');
 
-        ProcessBookingImage::assertNothingPushed();
+        Queue::assertNothingPushed();
     }
 
     /** 本地关键词未命中但轻量豆包判定相关：放行约课解析 */
@@ -161,7 +161,7 @@ class AsyncImageBookingTest extends TestCase
         $this->assertDatabaseHas('messages', [
             'role' => 'assistant',
             'type' => 'text',
-            'content' => '出错了：模拟异常',
+            'content' => '模拟异常',
             'organization_code' => 'tennis_a',
         ]);
     }

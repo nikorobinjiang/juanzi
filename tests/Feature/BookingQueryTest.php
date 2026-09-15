@@ -80,9 +80,9 @@ class BookingQueryTest extends TestCase
         $next = $this->booking->nextLesson('小明');
 
         $this->assertNotNull($last);
-        $this->assertSame(now()->subDays(2)->format('Y-m-d H:i'), $last->start_at->format('Y-m-d H:i'));
+        $this->assertSame(now()->subDays(2)->setTime(10, 0)->format('Y-m-d H:i'), $last->start_at->format('Y-m-d H:i'));
         $this->assertNotNull($next);
-        $this->assertSame(now()->addDays(1)->format('Y-m-d H:i'), $next->start_at->format('Y-m-d H:i'));
+        $this->assertSame(now()->addDays(1)->setTime(10, 0)->format('Y-m-d H:i'), $next->start_at->format('Y-m-d H:i'));
     }
 
     /** 教练空闲时段：被占用时段不出现，其余时段保留 */
@@ -198,8 +198,9 @@ class BookingQueryTest extends TestCase
     /** 改期：撞上教练已有课程被拦截；只换教练到空闲教练则成功 */
     public function test_update_blocks_coach_conflict(): void
     {
-        $this->makeBooking(['student_name' => '小明', 'start_at' => Carbon::today()->setTime(10, 0)]);
-        $target = $this->makeBooking(['student_name' => '小红', 'start_at' => Carbon::tomorrow()->setTime(10, 0)]);
+        // 小明占 1B、小红占 1A：改期到同一时刻只撞教练，验证教练冲突被拦截（否则会先报场地冲突）
+        $this->makeBooking(['student_name' => '小明', 'venue' => '1B', 'start_at' => Carbon::today()->setTime(10, 0)]);
+        $target = $this->makeBooking(['student_name' => '小红', 'venue' => '1A', 'start_at' => Carbon::tomorrow()->setTime(10, 0)]);
 
         // 把小红明天的课改到今天 10:00（王教练此时带小明）
         $result = $this->booking->update($target->id, [

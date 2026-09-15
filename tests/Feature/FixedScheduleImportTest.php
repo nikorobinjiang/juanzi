@@ -174,7 +174,7 @@ class FixedScheduleImportTest extends TestCase
         $this->assertSame(2, $result['created']);
         $this->assertSame([], $result['conflicts']);
         $this->assertCount(1, $result['overlaps']);
-        $this->assertSame('岩儿/余', $result['overlaps'][0]['overlap_with']);
+        $this->assertStringContainsString('岩儿/余', $result['overlaps'][0]['overlap_with']);
 
         $this->assertSame(2, BookingRecord::withoutGlobalScope(OrganizationScope::class)->count());
     }

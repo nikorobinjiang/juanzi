@@ -59,7 +59,7 @@ class AuthOrganizationTest extends TestCase
             'organization_auth_code' => 'ABC123',
         ]);
 
-        $response->assertRedirect('/appoints');
+        $response->assertRedirect('/');
         $this->assertAuthenticated();
 
         $this->assertDatabaseHas('users', [
@@ -153,7 +153,7 @@ class AuthOrganizationTest extends TestCase
             'password_confirmation' => 'secret123',
             'organization_code' => 'tennis_a',
             'organization_auth_code' => 'abc123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
         $this->assertAuthenticated();
     }
 
@@ -166,7 +166,7 @@ class AuthOrganizationTest extends TestCase
             'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'secret123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
         $this->assertAuthenticated();
 
         $this->post('/logout')->assertRedirect('/login');
@@ -214,7 +214,7 @@ class AuthOrganizationTest extends TestCase
             'password_confirmation' => 'secret123',
             'organization_code' => 'swim_a',
             'organization_auth_code' => 'ABC123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
         $this->assertAuthenticated();
 
         // 两个机构各有同名用户，均落库
@@ -255,7 +255,7 @@ class AuthOrganizationTest extends TestCase
             'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'pass_a_123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
         $this->assertAuthenticated();
 
         $this->post('/logout')->assertRedirect('/login');
@@ -264,7 +264,7 @@ class AuthOrganizationTest extends TestCase
             'organization_code' => 'swim_a',
             'username' => 'xiaoming',
             'password' => 'pass_b_123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
         $this->assertAuthenticated();
 
         $this->post('/logout')->assertRedirect('/login');
@@ -286,7 +286,7 @@ class AuthOrganizationTest extends TestCase
             ->assertOk()
             ->assertJsonPath('initialized', false)
             ->assertJsonStructure(['initialized', 'default_code'])
-            ->assertJson(fn ($json) => $json->where('initialized', false));
+            ->assertJsonPath('initialized', false);
 
         $body = $this->getJson('/organizations/tennis_a/status')->json();
         $this->assertMatchesRegularExpression('/^[A-Z0-9]{6}$/', (string) $body['default_code']);
@@ -319,7 +319,7 @@ class AuthOrganizationTest extends TestCase
             'organization_code' => 'tennis_a',
             'username' => 'xiaoming',
             'password' => 'secret123',
-        ])->assertRedirect('/appoints');
+        ])->assertRedirect('/');
 
         // 登录态应通过 session 延续到 API 请求
         $this->getJson('/api/booking')->assertOk();
@@ -385,7 +385,7 @@ class AuthOrganizationTest extends TestCase
         $this->assertSame(0, GeneratedImage::count());
     }
 
-    /** Excel 文件名带机构前缀；同机构可下载、跨机构下载被拒 */
+    /** Excel 文件名带机构名前缀；同机构可下载、跨机构下载被拒 */
     public function test_excel_filename_and_download_isolated_by_org(): void
     {
         $userA = $this->makeUser('alice', 'tennis_a');
@@ -395,7 +395,8 @@ class AuthOrganizationTest extends TestCase
         $result = app(ExcelService::class)->generate();
         $filename = $result['filename'];
 
-        $this->assertStringStartsWith('tennis_a_', $filename);
+        // 文件名前缀是机构中文名（网球馆A），不再用机构 code
+        $this->assertStringStartsWith('网球馆A_', $filename);
 
         // 同机构可下载
         $this->get('/api/excel/download/'.rawurlencode($filename))->assertOk();

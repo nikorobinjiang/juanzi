@@ -194,8 +194,58 @@ class CrmService
     }
 
     /* -----------------------------------------------------------------
-     | 结果文案
-     | ----------------------------------------------------------------- */
+    | 学员手机号
+    | ----------------------------------------------------------------- */
+
+    /**
+     * 登记 / 修改学员手机号（聊天里说「小明手机号138xxxxxxxx」）
+     *
+     * 与 arrangeLessons 不同：这里只维护手机号，不建课时、不改教练；
+     * 学员还没有档案时顺手建档（lessons_total 保持 0）。
+     *
+     * @param  array  $data  student_name + phone
+     */
+    public function updateStudentPhone(array $data): string
+    {
+        $name = trim((string) ($data['student_name'] ?? ''));
+        if ($name === '') {
+            return '好的，要给哪位学员登记手机号呢？例如：小明 手机号13800000000';
+        }
+
+        $phone = $this->normalizePhone((string) ($data['phone'] ?? ''));
+        if ($phone === '') {
+            return '没识别出手机号呢，格式像：'.$name.' 手机号13800000000';
+        }
+
+        /** @var Student $student */
+        $student = Student::firstOrNew(['name' => $name]);
+        $created = ! $student->exists;
+
+        if ($created) {
+            $student->organization_code = $this->orgCode();
+            $student->phone = $phone;
+            $student->save();
+
+            return '已为学员 '.$name.' 建档并登记手机号 '.$phone.'。';
+        }
+
+        $old = (string) $student->phone;
+
+        if ($old === $phone) {
+            return '学员 '.$name.' 的手机号本来就是 '.$phone.'，没有变化。';
+        }
+
+        $student->phone = $phone;
+        $student->save();
+
+        return $old === ''
+            ? '已登记学员 '.$name.' 的手机号：'.$phone.'。'
+            : '已把学员 '.$name.' 的手机号从 '.$old.' 改为 '.$phone.'。';
+    }
+
+    /* -----------------------------------------------------------------
+    | 结果文案
+    | ----------------------------------------------------------------- */
 
     private function formatCardResult(string $name, MembershipCard $card, ?Carbon $usedAt = null): string
     {
@@ -287,6 +337,22 @@ class CrmService
         return (string) (auth('web')->user()?->organization_code
             ?? \App\Models\Organization::query()->value('code')
             ?? '');
+    }
+
+    /**
+     * 手机号归一化：只留数字，兼容 +86 / 86 前缀、空格与连字符
+     *
+     * @return string 合法返回 11 位手机号，否则空串
+     */
+    private function normalizePhone(string $phone): string
+    {
+        $digits = preg_replace('/\D+/', '', $phone) ?? '';
+
+        if (preg_match('/^86(\d{11})$/', $digits, $m) === 1) {
+            $digits = $m[1];
+        }
+
+        return preg_match('/^1[3-9]\d{9}$/', $digits) === 1 ? $digits : '';
     }
 
     /**

@@ -35,6 +35,8 @@ class ChatController extends Controller
         '会员', '办卡', '办张', '月卡', '年卡', '次卡', '游泳卡', '健身卡', '续卡', '买卡', '办一张',
         '安排', '分配', '报名', '报个', '买课', '报课',
         '用了一次', '用一次', '来游了', '游了', '到店', '打卡', '用卡',
+        // 学员资料：登记 / 修改手机号
+        '手机号', '手机号码', '电话号码', '电话', '联系方式',
     ];
 
     public function __construct(
@@ -92,7 +94,16 @@ class ChatController extends Controller
                 ]);
             }
 
-            // 4. 文字消息：先本地关键词预筛，未命中再走轻量豆包二分类。
+            // 4. 本地快路径：格式固定的高频消息直接处理，不调用豆包（毫秒级返回）
+            //    目前覆盖「学员手机号登记/修改」——正则能锁定姓名+号码时直接写库，
+            //    省掉豆包二分类 + 意图解析两轮模型调用（每轮都是秒级等待）
+            $fast = $this->tryLocalFastPath($text);
+
+            if ($fast !== null) {
+                return response()->json($fast);
+            }
+
+            // 5. 文字消息：先本地关键词预筛，未命中再走轻量豆包二分类。
             //    判定与约课无关则直接回复，不调用约课解析接口（避免闲聊消息白白等待 1 分钟+）
             if (! $this->isBookingRelated($text) && ! $this->doubao->isBookingRelated($text)) {
                 $reply = '我是约课助手，只处理约课相关的事情哦（约课、改课、取消、查询课程/时间等）～';
@@ -106,7 +117,7 @@ class ChatController extends Controller
                 return response()->json(['reply' => $reply]);
             }
 
-            // 5. 文字约课 / 智能聊天（保持同步）
+            // 6. 文字约课 / 智能聊天（保持同步）
             $result = $this->handleBookingChat($userMessage, false);
 
             return response()->json($result);
@@ -208,8 +219,67 @@ class ChatController extends Controller
     }
 
     /* -----------------------------------------------------------------
-     | 内部：约课 / 智能聊天
-     | ----------------------------------------------------------------- */
+    | 内部：约课 / 智能聊天
+    | ----------------------------------------------------------------- */
+
+    /* -----------------------------------------------------------------
+    | 内部：本地快路径（不调豆包，毫秒级返回）
+    | ----------------------------------------------------------------- */
+
+    /**
+     * 格式固定的高频消息走本地直答，省掉两轮豆包调用（二分类 + 意图解析）
+     *
+     * @return array{reply: string, weekly: array}|null  命中返回结果，未命中返回 null
+     */
+    private function tryLocalFastPath(string $text): ?array
+    {
+        $reply = $this->matchStudentPhone($text);
+
+        if ($reply === null) {
+            return null;
+        }
+
+        Message::create([
+            'role' => 'assistant',
+            'type' => 'text',
+            'content' => $reply,
+        ]);
+
+        return [
+            'reply' => $reply,
+            'weekly' => $this->bookingSummary(),
+        ];
+    }
+
+    /**
+     * 学员手机号直陈句式：「小明手机号13800000000」「小明的电话改成13900000000」
+     *
+     * 只处理姓名直陈的说法；「帮小明登记一下手机号…」这类带前缀动词的句子交给豆包按意图解析，
+     * 避免正则把动词一起吞进姓名。
+     *
+     * @return string|null  命中返回处理结果文案，未命中返回 null
+     */
+    private function matchStudentPhone(string $text): ?string
+    {
+        // 前缀动词 / 祈使语气：交给豆包
+        if (preg_match('/^(帮|给|把|请|麻烦|登记|修改|更新|改|设置|添加)/u', $text) === 1) {
+            return null;
+        }
+
+        $keywords = '手机号|手机号码|电话号码|电话|联系方式';
+        // 姓名用非贪婪：否则「小明的电话…」会把「的」一起吞进姓名（拿最短能成立的姓名）
+        $pattern = '/^([\x{4e00}-\x{9fa5}A-Za-z0-9·]{1,8}?)(?:的)?\s*(?:'.$keywords.')'
+            .'\s*(?:是|为|改成|改为|换成|修改为|更新为|变更为)?\s*[:：]?\s*(\+?\d[\d\-\s]{5,17}\d)$/u';
+
+        if (preg_match($pattern, $text, $m) !== 1) {
+            return null;
+        }
+
+        return $this->crm->updateStudentPhone([
+            'student_name' => $m[1],
+            'phone' => $m[2],
+        ]);
+    }
 
     /**
      * 本地关键词预筛：判断纯文字消息是否与约课相关（毫秒级，命中即放行）
@@ -311,6 +381,11 @@ class ChatController extends Controller
 
             case 'use_card':
                 $reply = $this->doUseCard($data);
+                break;
+
+            // 学员资料：登记 / 修改手机号
+            case 'update_phone':
+                $reply = $this->doUpdatePhone($data);
                 break;
 
             default:
@@ -584,6 +659,11 @@ class ChatController extends Controller
     private function doUseCard(array $data): string
     {
         return $this->crm->useCard($data);
+    }
+
+    private function doUpdatePhone(array $data): string
+    {
+        return $this->crm->updateStudentPhone($data);
     }
 
     /* -----------------------------------------------------------------
