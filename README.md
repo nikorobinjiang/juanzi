@@ -95,6 +95,22 @@ return [
 
 **登录时需要先选择所属机构**（下拉默认第一项，必选）。用户名全局唯一，登录会校验所选机构与该用户注册时所属机构是否一致，选错机构会提示「用户名、密码或机构选择不正确」，避免登录后进错工作区。
 
+## 聊天记录可见范围
+
+- 默认：每个账号只能看到**自己**与助手的对话（`ChatController::history` 按 `user_id` 过滤），机构隔离由 `OrganizationScope` 兜底
+- 白名单：`app/Support/MessageViewer.php` 中登记的白名单账号（机构 code + 登录名两项同时匹配）可查看**本机构全部账号**的聊天记录，他人消息在页面上靠左显示并标注发送人
+- 当前白名单：`alan_tennis`（杭州阿蓝网球）的 `juanzi`；以后要给其他账号开权限，只在该文件 `WHITELIST` 里加一行即可，无需改 Controller
+- 注意：白名单只是取消「按用户过滤」，**机构隔离不受影响**，跨机构数据依然完全不可见
+
+### 本功能的服务端更新步骤
+
+纯代码变更，**不需要 `migrate`**：
+
+1. 服务器拉取最新代码（`app/Support/MessageViewer.php`、`app/Http/Controllers/ChatController.php`、`public/js/chat.js`、`public/css/chat.css`）
+2. `php artisan optimize:clear` 清掉路由/配置/视图缓存
+3. 重启 PHP-FPM（清 opcache）；若跑着常驻队列，顺带 `php artisan queue:restart`
+4. 验证：用 `juanzi` 登录打开聊天页，应能看到同机构其他账号的对话并带发送人标注；其他账号页面表现不变
+
 ## API 一览
 
 > 以下接口全部需要登录（未登录返回 401，前端自动跳转登录页）。

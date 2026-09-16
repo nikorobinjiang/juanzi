@@ -262,7 +262,9 @@ function startPolling() {
                 msgs.forEach((m) => {
                     appendMessage(payloadFromServer(m));
                     state.pollAfterId = Math.max(state.pollAfterId, m.id);
-                    if (m.role === 'assistant') hasAssistant = true;
+                    // 只在「本人对话收到助手回复」时结束等待：白名单账号能看到别人的对话，
+                    // 别人的助手消息不应让自己的截图约课提示提前收尾（is_mine 对普通账号为 undefined）
+                    if (m.role === 'assistant' && m.is_mine !== false) hasAssistant = true;
                 });
                 loadWeekly(); // 刷新约课表
 
@@ -305,6 +307,9 @@ function payloadFromServer(m) {
         content: m.content,
         image_url: m.image_url,
         excel: m.excel_url ? { url: m.excel_url, filename: m.excel_url.split('/').pop() } : null,
+        // 发送人信息：仅「可查看本机构全部聊天记录」的账号会收到（其他账号为 undefined）
+        sender: m.sender || null,
+        is_mine: m.is_mine,
         local: true,
     };
 }
@@ -327,10 +332,18 @@ function notifyUser(title) {
 function appendMessage(msg) {
     if (msg.id) state.renderedIds.add(msg.id);
 
+    // is_mine 只有「可查看本机构全部聊天记录」的账号会收到；
+    // 为 false 表示这条是与 AI 的对话归属别的账号，靠左显示并标注发送人
+    const isOther = msg.is_mine === false;
+
     const div = document.createElement('div');
-    div.className = `msg ${msg.role}`;
+    div.className = `msg ${msg.role}${isOther ? ' other' : ''}`;
 
     let html = '';
+
+    if (isOther && msg.sender) {
+        html += `<div class="msg-sender">${escapeHtml(msg.sender)}</div>`;
+    }
 
     if (msg.content) {
         html += `<div class="msg-text">${escapeHtml(msg.content)}</div>`;

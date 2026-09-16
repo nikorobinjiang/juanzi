@@ -227,6 +227,21 @@ body {
     text-align: right;
 }
 
+/* 他人消息：开通「查看本机构全部聊天记录」的账号看别人的对话时，
+   同一账号的气泡一律靠左，并在气泡内标注发送人，避免与自己的消息混淆 */
+.msg.user.other {
+    align-self: flex-start;
+    border-radius: var(--radius);
+    border-bottom-left-radius: 6px;
+}
+
+.msg .msg-sender {
+    font-size: 11px;
+    font-weight: 600;
+    opacity: .6;
+    margin-bottom: 4px;
+}
+
 /* 图片消息 */
 .msg .msg-img {
     display: block;

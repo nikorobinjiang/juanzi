@@ -5,9 +5,11 @@ namespace App\Http\Controllers;
 use App\Jobs\ProcessBookingImage;
 use App\Models\BookingRecord;
 use App\Services\CoachService;
+use App\Support\MessageViewer;
 use App\Support\QueryDateRange;
 use App\Models\GeneratedImage;
 use App\Models\Message;
+use App\Models\User;
 use App\Services\BookingService;
 use App\Services\CrmService;
 use App\Services\DoubaoService;
@@ -145,33 +147,41 @@ class ChatController extends Controller
     public function history(Request $request): JsonResponse
     {
         $afterId = (int) $request->input('after_id', 0);
+        $limit = min((int) $request->input('limit', 100), 500);
 
-        // 聊天记录按登录用户隔离：只返回当前用户自己的消息（机构隔离由 OrganizationScope 负责）
+        // 聊天记录默认按登录用户隔离：只返回当前用户自己的消息（机构隔离由 OrganizationScope 负责）
         // 未登录（异常情况）直接返回空，避免 where('user_id', null) 把无归属的历史消息漏出去
-        $userId = auth('web')->id();
+        $user = auth('web')->user();
+        $userId = (int) $user?->getKey();
 
         if (! $userId) {
             return response()->json(['messages' => []]);
         }
 
-        if ($afterId > 0) {
-            $messages = Message::where('user_id', $userId)
-                ->where('id', '>', $afterId)
-                ->orderBy('id', 'asc')
-                ->limit(min((int) $request->input('limit', 100), 500))
-                ->get()
-                ->map(fn (Message $m) => $this->messageToPayload($m));
-        } else {
-            $messages = Message::where('user_id', $userId)
-                ->orderBy('id', 'desc')
-                ->limit(min((int) $request->input('limit', 100), 500))
-                ->get()
-                ->reverse()
-                ->values()
-                ->map(fn (Message $m) => $this->messageToPayload($m));
+        // 白名单账号（见 MessageViewer）可查看本机构全部对话：不追加 user_id 过滤，
+        // 机构范围仍由 OrganizationScope 兜底；放开后本机构内 user_id 为空的历史消息也会一并出现
+        $seesAll = MessageViewer::seesAllMessages($user);
+
+        $query = Message::query();
+
+        if (! $seesAll) {
+            $query->where('user_id', $userId);
         }
 
-        return response()->json(['messages' => $messages]);
+        if ($afterId > 0) {
+            $messages = $query->where('id', '>', $afterId)
+                ->orderBy('id', 'asc')
+                ->limit($limit)
+                ->get();
+        } else {
+            $messages = $query->orderBy('id', 'desc')
+                ->limit($limit)
+                ->get()
+                ->reverse()
+                ->values();
+        }
+
+        return response()->json(['messages' => $this->messagePayloads($messages, $userId, $seesAll)]);
     }
 
     /* -----------------------------------------------------------------
@@ -1111,6 +1121,35 @@ class ChatController extends Controller
     private function bookingSummary(): array
     {
         return $this->booking->weeklyForApi()->toArray();
+    }
+
+    /**
+     * 批量转换历史消息（含发送人信息）
+     *
+     * 白名单账号能看到本机构全部对话，需要标注每条消息归属哪个账号：
+     * 账号名一次性 whereIn 取成 map，避免逐条消息查用户（N+1）。
+     * 普通账号不下发 sender / is_mine，保证接口返回结构与原先完全一致。
+     *
+     * @param  \Illuminate\Support\Collection<int, Message>  $messages
+     * @return array<int, array<string, mixed>>
+     */
+    private function messagePayloads(Collection $messages, int $userId, bool $withSender): array
+    {
+        $names = $withSender
+            ? User::whereIn('id', $messages->pluck('user_id')->filter()->unique()->all())->pluck('username', 'id')
+            : collect();
+
+        return $messages->map(function (Message $m) use ($names, $userId, $withSender) {
+            $payload = $this->messageToPayload($m);
+
+            if ($withSender) {
+                // user_id 为空的历史消息没有归属账号，sender 为 null，前端不渲染标注
+                $payload['sender'] = $m->user_id ? ($names[$m->user_id] ?? null) : null;
+                $payload['is_mine'] = (int) $m->user_id === $userId;
+            }
+
+            return $payload;
+        })->values()->all();
     }
 
     private function messageToPayload(Message $m): array
