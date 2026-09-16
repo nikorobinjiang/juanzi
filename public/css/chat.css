@@ -302,6 +302,19 @@ body {
 .badge.done { background: #37b24d; }
 .badge.cancel { background: #fa5252; }
 
+/* 行内状态标签：已完成 / 已取消（与场地徽章区分，避免只靠颜色判断） */
+.row-status {
+    flex-shrink: 0;
+    font-size: 11px;
+    line-height: 16px;
+    padding: 0 5px;
+    border-radius: 4px;
+    color: #868e96;
+    border: 1px solid currentColor;
+}
+.row-status.done { color: #37b24d; }
+.row-status.cancel { color: #fa5252; }
+
 /* ===== 快捷功能栏 ===== */
 .quick-bar {
     display: flex;

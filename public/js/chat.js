@@ -399,7 +399,8 @@ function renderWeekly(weeks) {
     if (!weeks || !weeks.length) return;
 
     elWeekly.innerHTML = '';
-    const statusLabel = { booked: '已约', completed: '已完成', cancelled: '已取消' };
+    // 「已约」是默认状态，不单独打标签，避免列表冗余
+    const statusLabel = { booked: '', completed: '已完成', cancelled: '已取消' };
 
     weeks.forEach((week) => {
         const card = document.createElement('div');
@@ -407,9 +408,14 @@ function renderWeekly(weeks) {
 
         const items = (week.items || []).map((b) => {
             const badgeClass = b.status === 'completed' ? 'done' : b.status === 'cancelled' ? 'cancel' : '';
+            const statusTag = statusLabel[b.status]
+                ? `<span class="row-status ${badgeClass}">${statusLabel[b.status]}</span>`
+                : '';
+
             return `<div class="week-row">
                 <span class="badge ${badgeClass}">${escapeHtml(b.venue)}</span>
                 <span><b>${escapeHtml(b.student_name)}</b> / ${escapeHtml(b.coach_name)}</span>
+                ${statusTag}
                 <span style="margin-left:auto;color:#666;">${escapeHtml((b.start_at || '').replace('T', ' '))}</span>
             </div>`;
         }).join('');

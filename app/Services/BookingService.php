@@ -352,6 +352,15 @@ class BookingService
      | 删除
      | ----------------------------------------------------------------- */
 
+    /**
+     * 删除（取消）约课
+     *
+     * 固定场来源且尚未开始的课不能物理删除：
+     * EnsureFixedScheduleWindow 会按模板滚动补齐本周 + 下周，而 materialize() 的幂等键是
+     * `fixed_schedule_id|开始时间`——把行删掉，这个键就消失了，下一次补齐会把课重新排回来。
+     * 因此改为保留一条「已取消」记录当占位：约课表不展示（weekly() 过滤），
+     * 补齐时幂等键命中 → 跳过，这一次的课不会复活。
+     */
     public function delete(int $id): array
     {
         $booking = BookingRecord::find($id);
@@ -360,6 +369,14 @@ class BookingService
         }
 
         $info = $booking->student_name.'（'.$booking->coach_name.'）'.$booking->start_at->format('m月d日 H:i').' '.$booking->venue;
+
+        if ($booking->fixed_schedule_id && $booking->start_at->gt(Carbon::now('Asia/Shanghai'))) {
+            $booking->status = BookingRecord::STATUS_CANCELLED;
+            $booking->save();
+
+            return ['success' => true, 'message' => '已取消约课：'.$info.'（本次不再排课）'];
+        }
+
         $booking->delete();
 
         return ['success' => true, 'message' => '已删除约课：'.$info];
@@ -627,12 +644,17 @@ class BookingService
      * [
      *   ['week_start' => '2026-08-24', 'week_end' => '2026-08-30', 'label' => '8月24日-8月30日', 'items' => [...]],
      * ]
+     *
+     * 已取消的记录不进约课表：约课表（含导出的 Excel）只展示还生效的课，
+     * 取消态记录保留在库里，作为固定场"这一次不排课"的占位（见 delete()）。
      */
     public function weekly(): Collection
     {
         $grouped = collect();
 
-        $this->windowed()->each(function (BookingRecord $booking) use ($grouped) {
+        $this->windowed()
+            ->reject(fn (BookingRecord $b) => $b->status === BookingRecord::STATUS_CANCELLED)
+            ->each(function (BookingRecord $booking) use ($grouped) {
             $weekStart = $booking->start_at->copy()->startOfWeek(Carbon::MONDAY);
             $key = $weekStart->format('Y-m-d');
 
@@ -755,32 +777,44 @@ class BookingService
             ];
         }
 
-        $query = BookingRecord::query()
-            ->where('status', '!=', BookingRecord::STATUS_CANCELLED);
-
-        if ($student !== '') {
-            $query->where('student_name', 'like', '%'.$student.'%');
-        }
-        if ($coach !== '') {
-            $query->where('coach_name', 'like', '%'.$coach.'%');
-        }
-        if ($startAtRaw !== '') {
-            try {
-                $query->where('start_at', 'like', '%'.Carbon::parse($startAtRaw)->format('Y-m-d H:i').'%');
-            } catch (\Throwable $e) {
-                // 时间无法解析时忽略该条件，避免查询报错
+        $conditions = function ($query) use ($student, $coach, $startAtRaw): void {
+            if ($student !== '') {
+                $query->where('student_name', 'like', '%'.$student.'%');
             }
-        }
+            if ($coach !== '') {
+                $query->where('coach_name', 'like', '%'.$coach.'%');
+            }
+            if ($startAtRaw !== '') {
+                try {
+                    $query->where('start_at', 'like', '%'.Carbon::parse($startAtRaw)->format('Y-m-d H:i').'%');
+                } catch (\Throwable $e) {
+                    // 时间无法解析时忽略该条件，避免查询报错
+                }
+            }
+        };
 
-        $candidates = $query->orderBy('start_at')->orderBy('venue')->get();
+        $candidates = BookingRecord::query()
+            ->where('status', '!=', BookingRecord::STATUS_CANCELLED)
+            ->where($conditions)
+            ->orderBy('start_at')
+            ->orderBy('venue')
+            ->get();
 
         if ($candidates->isEmpty()) {
+            // 存在同条件的取消态记录 → 说明这节课已经取消过了，明确告知，避免用户反复操作
+            $alreadyCancelled = BookingRecord::query()
+                ->where('status', BookingRecord::STATUS_CANCELLED)
+                ->where($conditions)
+                ->exists();
+
             return [
                 'success' => false,
                 'need_info' => false,
                 'booking' => null,
                 'candidates' => [],
-                'message' => $this->locateNotFoundMessage($student, $coach, $startAtRaw),
+                'message' => $alreadyCancelled
+                    ? '这节课已经取消过了，约课表里不会再出现。'
+                    : $this->locateNotFoundMessage($student, $coach, $startAtRaw),
             ];
         }
 
