@@ -405,9 +405,13 @@ class FixedScheduleService
     /**
      * 教练姓氏批量改名：预约记录 + 固定课表模板 + 学员档案
      *
-     * @return int 命中的记录总条数
+     * 主数据 coaches 同步由 CoachService::syncRename() 负责（旧名进别名），
+     * 与三张业务表的字符串刷新放在同一事务里。
+     *
+     * @param  string  $orgCode  限定机构；为空时取当前登录机构，仍未取到则维持原有全表行为（CLI 数据订正）
+     * @return int 命中的业务记录总条数（不含主数据本身）
      */
-    public function renameCoach(string $oldName, string $newName): int
+    public function renameCoach(string $oldName, string $newName, string $orgCode = ''): int
     {
         $oldName = trim($oldName);
         $newName = trim($newName);
@@ -416,18 +420,32 @@ class FixedScheduleService
             return 0;
         }
 
-        $orgCode = (string) (auth('web')->user()?->organization_code ?? '');
+        if ($orgCode === '') {
+            $orgCode = (string) (auth('web')->user()?->organization_code ?? '');
+        }
 
-        return DB::transaction(function () use ($oldName, $newName, $orgCode) {
-            $bookings = BookingRecord::withoutGlobalScope(OrganizationScope::class)
+        // 先确认业务表里确实有这位教练：一处都没有就原样返回 0，
+        // 避免"改一个不存在的名字"顺手在主数据里凭空建档
+        if ($this->countCoachRecords($oldName, $orgCode) === 0) {
+            return 0;
+        }
+
+        // 再改主数据：旧名写进别名，保证历史叫法以后还能归一到新名
+        $masterChanged = app(CoachService::class)->syncRename($oldName, $newName, $orgCode);
+
+        // 最后刷业务表的字符串：两者放在同一事务里，避免出现"档案改了、约课没改"的半截状态
+        return DB::transaction(function () use ($oldName, $newName, $orgCode, $masterChanged) {
+            $scoped = fn ($query) => $orgCode !== '' ? $query->where('organization_code', $orgCode) : $query;
+
+            $bookings = $scoped(BookingRecord::withoutGlobalScope(OrganizationScope::class))
                 ->where('coach_name', $oldName)
                 ->update(['coach_name' => $newName, 'updated_at' => now()]);
 
-            $templates = FixedSchedule::withoutGlobalScope(OrganizationScope::class)
+            $templates = $scoped(FixedSchedule::withoutGlobalScope(OrganizationScope::class))
                 ->where('coach_name', $oldName)
                 ->update(['coach_name' => $newName, 'updated_at' => now()]);
 
-            $students = Student::withoutGlobalScope(OrganizationScope::class)
+            $students = $scoped(Student::withoutGlobalScope(OrganizationScope::class))
                 ->where('coach_name', $oldName)
                 ->update(['coach_name' => $newName, 'updated_at' => now()]);
 
@@ -438,10 +456,26 @@ class FixedScheduleService
                 'bookings' => $bookings,
                 'templates' => $templates,
                 'students' => $students,
+                'master_changed' => $masterChanged,
             ]);
 
             return $bookings + $templates + $students;
         });
+    }
+
+    /**
+     * 该教练在三张业务表里出现过的记录条数
+     */
+    private function countCoachRecords(string $coachName, string $orgCode): int
+    {
+        $scoped = fn ($query) => $orgCode !== '' ? $query->where('organization_code', $orgCode) : $query;
+
+        return $scoped(BookingRecord::withoutGlobalScope(OrganizationScope::class))
+                ->where('coach_name', $coachName)->count()
+            + $scoped(FixedSchedule::withoutGlobalScope(OrganizationScope::class))
+                ->where('coach_name', $coachName)->count()
+            + $scoped(Student::withoutGlobalScope(OrganizationScope::class))
+                ->where('coach_name', $coachName)->count();
     }
 
     /**

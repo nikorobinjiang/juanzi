@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Jobs\ProcessBookingImage;
 use App\Models\BookingRecord;
+use App\Services\CoachService;
 use App\Support\QueryDateRange;
 use App\Models\GeneratedImage;
 use App\Models\Message;
@@ -562,13 +563,17 @@ class ChatController extends Controller
             return '请告诉我教练原来的名字和新的名字，例如：把孟改成孟宇。';
         }
 
+        $coachService = app(CoachService::class);
         $count = $this->fixedSchedule->renameCoach($oldName, $newName);
+        $masterSynced = $coachService->hasProfile($newName);
 
-        if ($count === 0) {
+        // 三张业务表都没命中、主数据里也没有新名字，才算"没找到这位教练"
+        if ($count === 0 && ! $masterSynced) {
             return '没有找到教练「'.$oldName.'」的相关记录，请确认名字是否正确。';
         }
 
-        return '已把教练「'.$oldName.'」改为「'.$newName.'」，共更新 '.$count.' 条记录（含约课记录、固定场次和学员档案）。';
+        return '已把教练「'.$oldName.'」改为「'.$newName.'」，共更新 '.$count.' 条记录（含约课记录、固定场次和学员档案）'
+            .($masterSynced ? '，教练档案已同步。' : '。');
     }
 
     /**

@@ -88,6 +88,12 @@ class BookingService
             $coach = trim((string) (auth('web')->user()?->name ?? ''));
         }
 
+        // 别名归一：「王教练」「小王」这类写法统一落到主数据里的规范名，
+        // 保证同一教练在 booking_records 里只有一种写法（冲突检测靠字符串匹配）
+        if ($coach !== '') {
+            $coach = app(CoachService::class)->resolveCoachName($coach);
+        }
+
         // 教练冲突：同一教练同一时间只能带一节课（与场地无关，先校验）
         if ($coach !== '') {
             $coachConflict = $this->checkCoachConflict($coach, $startAt, $endAt);
@@ -229,6 +235,15 @@ class BookingService
      */
     private function ensureStudentProfile(string $name, string $coach = ''): bool
     {
+        if ($coach !== '') {
+            // 本次带课教练顺手收进主数据（已存在则跳过）
+            app(CoachService::class)->ensureCoach(
+                $coach,
+                null,
+                (string) (auth('web')->user()?->organization_code ?? '')
+            );
+        }
+
         return app(StudentProfileService::class)->ensure($name, $coach);
     }
 
@@ -253,7 +268,8 @@ class BookingService
             ? Carbon::parse($data['start_at'])
             : $booking->start_at;
         $newCoach = array_key_exists('coach_name', $data) && $data['coach_name']
-            ? trim($data['coach_name'])
+            // 与 create() 同口径：入库前先做别名归一
+            ? app(CoachService::class)->resolveCoachName(trim($data['coach_name']))
             : $booking->coach_name;
         $newVenue = array_key_exists('venue', $data) && $data['venue']
             ? trim($data['venue'])

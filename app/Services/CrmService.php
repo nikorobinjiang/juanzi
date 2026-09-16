@@ -108,6 +108,9 @@ class CrmService
 
                 if ($coach !== '') {
                     $student->coach_name = $coach;
+
+                    // 分配到的新教练同步进主数据（已存在时只补缺失信息）
+                    app(CoachService::class)->ensureCoach($coach, null, $this->orgCode());
                 }
 
                 if ($count > 0) {
@@ -303,9 +306,14 @@ class CrmService
             })
             ->values();
 
-        $coaches = BookingRecord::where('status', '!=', BookingRecord::STATUS_CANCELLED)
-            ->where('coach_name', '!=', '')
-            ->pluck('coach_name')
+        // 教练名单以主数据 coaches 为准（含在职状态与别名），
+        // 再并上业务表里出现、但主数据还没建档的写法做兜底，避免回填没跑到时 AI 上下文断供
+        $coaches = collect(app(CoachService::class)->activeNames())
+            ->merge(
+                BookingRecord::where('status', '!=', BookingRecord::STATUS_CANCELLED)
+                    ->where('coach_name', '!=', '')
+                    ->pluck('coach_name')
+            )
             ->merge($students->pluck('coach_name')->filter())
             ->map(fn ($n) => trim((string) $n))
             ->filter(fn ($n) => $n !== '')
