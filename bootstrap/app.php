@@ -1,5 +1,6 @@
 <?php
 
+use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -31,6 +32,16 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->api(append: [
             \App\Http\Middleware\EnsureFixedScheduleWindow::class,
         ]);
+    })
+    ->withSchedule(function (Schedule $schedule): void {
+        // 每天定点推送「明日上课提醒」给学员和教练（服务器需配 * * * * * php artisan schedule:run）
+        // 两端总开关都关着时不注册，避免每天空跑刷日志；单看一侧开关请在 wechat.remind 里配置
+        $schedule->command('bookings:remind')
+            ->dailyAt((string) config('wechat.remind.time', '20:00'))
+            ->timezone(\App\Support\BookingWindow::TIMEZONE)
+            ->withoutOverlapping(30)
+            ->when(fn () => (bool) config('wechat.remind.student_enabled')
+                || (bool) config('wechat.remind.coach_enabled'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
