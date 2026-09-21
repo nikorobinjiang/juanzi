@@ -409,9 +409,10 @@ class FixedScheduleService
      * 与三张业务表的字符串刷新放在同一事务里。
      *
      * @param  string  $orgCode  限定机构；为空时取当前登录机构，仍未取到则维持原有全表行为（CLI 数据订正）
+     * @param  bool  $force  后台改名用：业务表没有记录时也要改主数据（不走"改一个不存在的名字"的短路）
      * @return int 命中的业务记录总条数（不含主数据本身）
      */
-    public function renameCoach(string $oldName, string $newName, string $orgCode = ''): int
+    public function renameCoach(string $oldName, string $newName, string $orgCode = '', bool $force = false): int
     {
         $oldName = trim($oldName);
         $newName = trim($newName);
@@ -426,7 +427,8 @@ class FixedScheduleService
 
         // 先确认业务表里确实有这位教练：一处都没有就原样返回 0，
         // 避免"改一个不存在的名字"顺手在主数据里凭空建档
-        if ($this->countCoachRecords($oldName, $orgCode) === 0) {
+        // 后台改名是拿档案主键改的，名字一定存在，用 force 跳过这道短路
+        if (! $force && $this->countCoachRecords($oldName, $orgCode) === 0) {
             return 0;
         }
 
@@ -464,9 +466,9 @@ class FixedScheduleService
     }
 
     /**
-     * 该教练在三张业务表里出现过的记录条数
+     * 该教练在三张业务表里出现过的记录条数（后台删除教练前用它判断影响面）
      */
-    private function countCoachRecords(string $coachName, string $orgCode): int
+    public function countCoachRecords(string $coachName, string $orgCode): int
     {
         $scoped = fn ($query) => $orgCode !== '' ? $query->where('organization_code', $orgCode) : $query;
 

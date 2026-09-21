@@ -50,6 +50,17 @@
             </span>
             <span class="entry-arrow">›</span>
         </a>
+
+        @if(auth()->user()?->isManager())
+            <a class="entry" href="{{ url('/admin') }}">
+                <span class="entry-icon admin">⚙️</span>
+                <span class="entry-text">
+                    <b>后台管理</b>
+                    <i>用户 · 机构码 · 学员会员 · 教练</i>
+                </span>
+                <span class="entry-arrow">›</span>
+            </a>
+        @endif
     </main>
 
     <footer class="foot">约刻 · 让场馆管理更简单<span class="icp">浙ICP备2026071731号-1</span></footer>

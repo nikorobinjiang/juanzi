@@ -16,6 +16,12 @@ return Application::configure(basePath: dirname(__DIR__))
         // 未登录访问页面时跳转登录页（API 请求期望 JSON，由异常处理器直接返回 401）
         $middleware->redirectGuestsTo(fn () => route('login'));
 
+        // 后台管理：admin = 总管理员与机构管理员均可；super.admin = 仅总管理员
+        $middleware->alias([
+            'admin' => \App\Http\Middleware\EnsureAdminRole::class,
+            'super.admin' => \App\Http\Middleware\EnsureSuperAdminRole::class,
+        ]);
+
         // API 复用 web 登录态：api 组默认没有 session 中间件，/api/* 请求读不到登录 session
         // 会永远返回 401 → 前端跳 /login → 已登录又被 guest 中间件弹回 /appoints → 页面闪刷新循环
         $middleware->api(append: [

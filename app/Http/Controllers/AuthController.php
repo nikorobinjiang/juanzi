@@ -117,6 +117,8 @@ class AuthController extends Controller
                 'username' => $validated['username'],
                 'password' => $validated['password'], // 模型 casts 会自动哈希
                 'organization_code' => $validated['organization_code'],
+                // 开放注册一律是普通用户；机构管理员由总管理员在后台指派
+                'role' => User::ROLE_USER,
             ]);
         });
 

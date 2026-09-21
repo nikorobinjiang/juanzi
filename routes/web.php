@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,6 +34,11 @@ Route::middleware('auth')->group(function () {
     // 独立图片生成页
     Route::get('/generate', function () {
         return view('generate');
+    });
+
+    // 后台管理控制台（仅总管理员 / 机构管理员，其余由中间件挡回首页）
+    Route::middleware('admin')->group(function () {
+        Route::get('/admin', [AdminController::class, 'index']);
     });
 
     // 登出

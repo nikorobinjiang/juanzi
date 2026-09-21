@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 /**
  * 教练领域服务：所有教练读写的唯一入口
@@ -181,6 +182,216 @@ class CoachService
 
             return null;
         }
+    }
+
+    /**
+     * 后台：机构内教练档案清单（含停用，带绑定账号）
+     *
+     * @return Collection<int, Coach>
+     */
+    public function listForAdmin(string $orgCode): Collection
+    {
+        if ($orgCode === '') {
+            return new Collection;
+        }
+
+        return Coach::withoutGlobalScope(OrganizationScope::class)
+            ->with('user:id,username,name')
+            ->where('organization_code', $orgCode)
+            ->orderBy('name')
+            ->get();
+    }
+
+    /**
+     * 后台：新建教练档案
+     *
+     * 与 ensureCoach() 的区别：ensureCoach 是「业务上出现这个名字就补一条」的兜底建档，
+     * 后台是显式维护，姓名重复要直接报错，别名 / 在职状态 / 备注也要完整落库。
+     *
+     * @param  array<string, mixed>  $data  name / phone / aliases / active / remark
+     */
+    public function createForAdmin(array $data, string $orgCode): Coach
+    {
+        $name = trim((string) ($data['name'] ?? ''));
+
+        if ($name === '' || $orgCode === '') {
+            throw ValidationException::withMessages(['name' => '请填写教练姓名']);
+        }
+
+        if ($this->coachByName($name, $orgCode)) {
+            throw ValidationException::withMessages(['name' => '本机构已有同名教练']);
+        }
+
+        $coach = Coach::create([
+            'organization_code' => $orgCode,
+            'name' => $name,
+            'phone' => $data['phone'] ?? null,
+            'aliases' => $this->normalizeAliases($data['aliases'] ?? []),
+            'active' => (bool) ($data['active'] ?? true),
+            'remark' => $data['remark'] ?? null,
+        ]);
+
+        $this->flush($orgCode);
+
+        Log::info('后台新建教练档案', [
+            'organization_code' => $orgCode,
+            'coach_id' => $coach->getKey(),
+            'coach_name' => $coach->name,
+        ]);
+
+        return $coach;
+    }
+
+    /**
+     * 后台：编辑教练档案（改名走改名同步，业务表三张一起刷）
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function updateForAdmin(Coach $coach, array $data): Coach
+    {
+        $code = (string) $coach->organization_code;
+        $oldName = (string) $coach->name;
+        $newName = trim((string) ($data['name'] ?? ''));
+
+        if ($newName === '') {
+            throw ValidationException::withMessages(['name' => '请填写教练姓名']);
+        }
+
+        $renamed = $newName !== $oldName;
+
+        if ($renamed && $this->coachByName($newName, $code)) {
+            throw ValidationException::withMessages(['name' => '本机构已有同名教练']);
+        }
+
+        if ($renamed) {
+            // force：档案是拿主键改的，业务表里没有记录也要改主数据
+            app(FixedScheduleService::class)->renameCoach($oldName, $newName, $code, true);
+
+            // 改名同步里已把旧名并进别名，刷新一下，否则下面会用这份旧实例把别名覆盖回去
+            $coach->refresh();
+        }
+
+        // 别名留空表示"不改"，避免把改名同步刚并进来的旧名冲掉
+        $aliases = array_key_exists('aliases', $data) ? $this->normalizeAliases($data['aliases']) : [];
+
+        $coach->fill([
+            'name' => $newName,
+            'phone' => array_key_exists('phone', $data) ? $data['phone'] : $coach->phone,
+            'aliases' => $aliases === [] ? $coach->aliases_list : $aliases,
+            'active' => array_key_exists('active', $data) ? (bool) $data['active'] : $coach->active,
+            'remark' => array_key_exists('remark', $data) ? $data['remark'] : $coach->remark,
+        ])->save();
+
+        $this->flush($code);
+
+        Log::info('后台编辑教练档案', [
+            'organization_code' => $code,
+            'coach_id' => $coach->getKey(),
+            'old' => $oldName,
+            'new' => $coach->name,
+        ]);
+
+        return $coach;
+    }
+
+    /**
+     * 后台：停用 / 启用教练（停用后不再出现在给 AI 的名单里）
+     */
+    public function setActive(Coach $coach, bool $active): Coach
+    {
+        $coach->active = $active;
+        $coach->save();
+
+        $this->flush((string) $coach->organization_code);
+
+        Log::info('后台调整教练在职状态', [
+            'organization_code' => $coach->organization_code,
+            'coach_id' => $coach->getKey(),
+            'coach_name' => $coach->name,
+            'active' => $active,
+        ]);
+
+        return $coach;
+    }
+
+    /**
+     * 后台：教练在业务表里的引用条数（删除前的影响面提示）
+     */
+    public function countReferences(Coach $coach): int
+    {
+        return app(FixedScheduleService::class)
+            ->countCoachRecords((string) $coach->name, (string) $coach->organization_code);
+    }
+
+    /**
+     * 后台：删除教练档案
+     *
+     * 业务表的 coach_name 是字符串快照，删档案不会让历史约课消失；
+     * 但有引用时要求显式确认（force），否则提示改用「停用」。
+     */
+    public function deleteForAdmin(Coach $coach, bool $force = false): bool
+    {
+        $references = $this->countReferences($coach);
+
+        if ($references > 0 && ! $force) {
+            throw ValidationException::withMessages([
+                'coach' => "该教练在 {$references} 条业务记录中出现，建议先停用；确认要删除请勾选强制删除",
+            ]);
+        }
+
+        $id = $coach->getKey();
+        $code = (string) $coach->organization_code;
+        $name = (string) $coach->name;
+
+        $coach->delete();
+        $this->flush($code);
+
+        Log::info('后台删除教练档案', [
+            'organization_code' => $code,
+            'coach_id' => $id,
+            'coach_name' => $name,
+            'references' => $references,
+            'forced' => $force,
+        ]);
+
+        return true;
+    }
+
+    /**
+     * 后台展示结构
+     *
+     * @return array<string, mixed>
+     */
+    public function presentForAdmin(Coach $coach): array
+    {
+        return [
+            'id' => $coach->getKey(),
+            'name' => $coach->name,
+            'phone' => $coach->phone,
+            'aliases' => $coach->aliases_list,
+            'active' => (bool) $coach->active,
+            'remark' => $coach->remark,
+            'user_id' => $coach->user_id,
+            'username' => $coach->user?->username,
+            'organization_code' => $coach->organization_code,
+        ];
+    }
+
+    /**
+     * 别名归一：逗号 / 顿号分隔的字符串或数组都收，去空白去空值去重
+     *
+     * @return array<int, string>
+     */
+    private function normalizeAliases(mixed $aliases): array
+    {
+        $list = is_array($aliases)
+            ? $aliases
+            : (preg_split('/[,，、;；\s]+/', (string) $aliases) ?: []);
+
+        return array_values(array_unique(array_filter(
+            array_map(fn ($alias) => trim((string) $alias), $list),
+            fn ($alias) => $alias !== ''
+        )));
     }
 
     /**

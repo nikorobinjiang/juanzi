@@ -18,10 +18,30 @@ class User extends Authenticatable
      *
      * @var list<string>
      */
+    /** 普通账号：无后台权限 */
+    public const ROLE_USER = 'user';
+
+    /** 机构管理员：后台内只能管理自己所属机构 */
+    public const ROLE_ORG_ADMIN = 'org_admin';
+
+    /** 总管理员：后台内可切换并管理所有机构 */
+    public const ROLE_ADMIN = 'admin';
+
+    /** @var list<string> */
+    public const ROLES = [self::ROLE_USER, self::ROLE_ORG_ADMIN, self::ROLE_ADMIN];
+
+    /** @var array<string, string> */
+    public const ROLE_LABELS = [
+        self::ROLE_USER => '普通用户',
+        self::ROLE_ORG_ADMIN => '机构管理员',
+        self::ROLE_ADMIN => '总管理员',
+    ];
+
     protected $fillable = [
         'name',
         'username',
         'organization_code',
+        'role',
         'email',
         'password',
     ];
@@ -55,5 +75,41 @@ class User extends Authenticatable
     public function coach(): HasOne
     {
         return $this->hasOne(Coach::class, 'user_id');
+    }
+
+    /**
+     * 角色（脏数据兜底为普通用户，避免未知值被当成管理员）
+     *
+     * 不叫 role()：User 上已存在 role 字段，同名方法会被 Eloquent 当成关联方法解析。
+     */
+    public function currentRole(): string
+    {
+        $role = (string) ($this->attributes['role'] ?? '');
+
+        return in_array($role, self::ROLES, true) ? $role : self::ROLE_USER;
+    }
+
+    /** 是否总管理员（可管理所有机构） */
+    public function isAdmin(): bool
+    {
+        return $this->currentRole() === self::ROLE_ADMIN;
+    }
+
+    /** 是否机构管理员（仅本机构） */
+    public function isOrgAdmin(): bool
+    {
+        return $this->currentRole() === self::ROLE_ORG_ADMIN;
+    }
+
+    /** 是否能进后台（总管理员或机构管理员） */
+    public function isManager(): bool
+    {
+        return $this->isAdmin() || $this->isOrgAdmin();
+    }
+
+    /** 角色中文名（列表展示用） */
+    public function getRoleLabelAttribute(): string
+    {
+        return self::ROLE_LABELS[$this->currentRole()] ?? $this->currentRole();
     }
 }

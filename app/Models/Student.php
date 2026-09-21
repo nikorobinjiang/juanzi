@@ -23,10 +23,12 @@ class Student extends Model
         static::addGlobalScope(new OrganizationScope);
 
         // 新建时自动填充机构
+        // 只在未指定时补：总管理员在后台是按「当前管理机构」显式传 organization_code 的，
+        // 无条件覆盖会把跨机构新建的学员错写到管理员自己的机构下。
         static::creating(function (Model $model) {
             $code = auth('web')->user()?->organization_code;
 
-            if ($code) {
+            if ($code && blank($model->organization_code)) {
                 $model->organization_code = $code;
             }
         });

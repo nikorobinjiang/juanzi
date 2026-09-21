@@ -156,6 +156,10 @@ body {
     background: linear-gradient(145deg, #E9FDF5 0%, #C9F2E4 100%);
 }
 
+.entry-icon.admin {
+    background: linear-gradient(145deg, #E7EBFF 0%, #C9D4FB 100%);
+}
+
 .entry-text { flex: 1; min-width: 0; }
 
 .entry-text b {

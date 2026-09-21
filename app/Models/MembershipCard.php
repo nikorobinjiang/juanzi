@@ -42,10 +42,11 @@ class MembershipCard extends Model
         static::addGlobalScope(new OrganizationScope);
 
         // 新建时自动填充机构
+        // 只在未指定时补：总管理员跨机构开卡时会显式传 organization_code，不能覆盖。
         static::creating(function (Model $model) {
             $code = auth('web')->user()?->organization_code;
 
-            if ($code) {
+            if ($code && blank($model->organization_code)) {
                 $model->organization_code = $code;
             }
         });

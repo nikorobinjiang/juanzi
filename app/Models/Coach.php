@@ -38,7 +38,8 @@ class Coach extends Model
         static::creating(function (Model $model) {
             $code = auth('web')->user()?->organization_code;
 
-            if ($code) {
+            // 只在未指定时补：后台按「当前管理机构」显式传值时不能被覆盖
+            if ($code && blank($model->organization_code)) {
                 $model->organization_code = $code;
             }
         });
