@@ -355,6 +355,18 @@ class ChatController extends Controller
         $data = (array) ($parsed['data'] ?? []);
         $reply = '';
 
+        // 模型偶发会把明确的约课指令（如「给小明约明天下午3点」）判成 other / query(general)，
+        // 掉进"只会查数据"的问答兜底里，用户收不到约课结果、课也没约上。
+        // 这里本地重判一次：像操作指令就抢救成 create 并重新走约课流程。
+        if ($this->misclassifiedBookingCommand($intent, $data, $text)) {
+            $rescued = $this->rescueBookingCreate($text, $bookingsJson);
+
+            if ($rescued !== null) {
+                $intent = 'create';
+                $data = $rescued;
+            }
+        }
+
         switch ($intent) {
             case 'create':
                 $reply = $this->doCreate($data);
@@ -421,6 +433,69 @@ class ChatController extends Controller
             'excel' => $excelPayload,
             'weekly' => $this->bookingSummary(),
         ];
+    }
+
+    /**
+     * 判断这次解析是否把约课指令误判成了其它意图
+     *
+     * 只在会被"问答兜底"吞掉的两种结果上做抢救：intent=other 与 query(general)。
+     * 其余意图（含正常的 create）一律不动，避免多一次模型调用、也避免误改用户的操作。
+     */
+    private function misclassifiedBookingCommand(string $intent, array $data, string $text): bool
+    {
+        $queryType = strtolower(trim((string) ($data['query_type'] ?? '')));
+        $swallowed = $intent === 'other' || ($intent === 'query' && in_array($queryType, ['', 'general'], true));
+
+        return $swallowed && $this->looksLikeBookingCommand($text);
+    }
+
+    /**
+     * 本地重判：这句话看起来是「约课操作指令」而不是提问
+     *
+     * 判定条件必须同时满足：约课动词 + 时间信息，且不是疑问句——
+     * 宁可漏救（继续走原兜底），也不能把正常的查询反问误当成约课去建记录。
+     */
+    private function looksLikeBookingCommand(string $text): bool
+    {
+        $t = trim($text);
+        if ($t === '') {
+            return false;
+        }
+
+        // 疑问句 / 查询口吻一律不算操作指令
+        if (preg_match('/[?？]|吗|呢|什么|怎么|哪|多少|几|有没有|是否有|能不能|可以|还剩|能不能/u', $t) === 1) {
+            return false;
+        }
+
+        $hasVerb = preg_match('/(约课|预约|约一节|约一次|约个|约一下|约[^定]|排课|排一节|加课|加一节|加个课|定一节|订一节)/u', $t) === 1;
+        if (! $hasVerb) {
+            return false;
+        }
+
+        return preg_match('/(今天|明天|后天|大后天|星期[一二三四五六日天]|周[一二三四五六日天]|这周|下周|下下周|上午|中午|下午|晚上|[0-9一二三四五六七八九十两]+\s*点|[0-9]{1,2}\s*[:：]\s*[0-9]{2}|[0-9]{1,2}\s*号|[0-9]{1,2}\s*月\s*[0-9]{1,2})/u', $t) === 1;
+    }
+
+    /**
+     * 把被误判的约课指令重新解析成 create 参数
+     *
+     * @return array<string, mixed>|null  解析出上课时间返回参数数组，失败或时间缺失返回 null（交还原流程兜底）
+     */
+    private function rescueBookingCreate(string $text, string $bookingsJson): ?array
+    {
+        try {
+            $parsed = $this->doubao->parseBookingCreate($text, $bookingsJson);
+        } catch (\Throwable $e) {
+            Log::warning('约课指令抢救解析失败', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        // 没有上课时间约不了课，交给原来的兜底；缺学员的走 doCreate 的追问
+        if (! is_array($parsed) || trim((string) ($parsed['start_at'] ?? '')) === '') {
+            return null;
+        }
+
+        return $parsed;
     }
 
     private function doCreate(array $data): string

@@ -267,6 +267,25 @@
             + '<div class="code-actions">'
             + '<button class="code-btn" data-act="org-copy">复制认证码</button>'
             + '<button class="code-btn danger" data-act="org-reset">重置认证码</button>'
+            + '</div></div>'
+            + venueModeCard(org);
+    }
+
+    /** 场地模式卡片：按场馆性质决定约课是否分配 / 校验场地 */
+    function venueModeCard(org) {
+        var isNone = org.venue_mode === 'none';
+
+        return '<div class="code-card">'
+            + '<div class="code-row"><div><div class="code-name">场地模式</div>'
+            + '<div class="code-label">' + (isNone ? '不按场地排课 · 游泳馆 / 棋院类' : '按场地排课 · 网球馆 / 羽毛球馆类') + '</div></div>'
+            + '<span class="tag ' + (isNone ? 'gray' : 'green') + '">' + esc(org.venue_mode_label || (isNone ? '不按场地排课' : '按场地排课')) + '</span></div>'
+            + '<div class="code-hint">' + (isNone
+                ? '约课不填场地、不做场地冲突检测，只保留营业时段与「一位教练同一时间只能带一节课」。'
+                : '约课必须分配场地，并检测整场 / 半场冲突（整场被占用时两个半场都不可约）。')
+            + '</div>'
+            + '<div class="code-actions">'
+            + '<button class="code-btn' + (isNone ? ' danger' : '') + '" data-act="org-venue-mode" data-mode="none">切为不按场地</button>'
+            + '<button class="code-btn' + (isNone ? '' : ' danger') + '" data-act="org-venue-mode" data-mode="required">切为按场地</button>'
             + '</div></div>';
     }
 
@@ -609,6 +628,27 @@
                 api('/api/admin/organization/reset-auth-code', { method: 'POST', body: { org: state.org } })
                     .then(function () { toast('认证码已重置'); reload(); })
                     .catch(function (err) { toast(err.message || '重置失败'); });
+            });
+
+            return;
+        }
+
+        if (act === 'org-venue-mode') {
+            var mode = button.getAttribute('data-mode');
+            var toNone = mode === 'none';
+
+            confirmDialog({
+                title: toNone ? '切换为「不按场地排课」' : '切换为「按场地排课」',
+                text: toNone
+                    ? '之后新建 / 修改的课不再分配场地、也不检测场地冲突，只保留教练冲突与营业时段；已有约课记录不受影响。'
+                    : '之后新建 / 修改的课需要分配场地，并检测整场 / 半场冲突；已有约课记录不受影响。',
+                okText: '确认切换'
+            }).then(function (result) {
+                if (!result.ok) { return; }
+
+                api('/api/admin/organization/venue-mode', { method: 'POST', body: { org: state.org, venue_mode: mode } })
+                    .then(function () { toast('场地模式已切换'); reload(); })
+                    .catch(function (err) { toast(err.message || '切换失败'); });
             });
 
             return;

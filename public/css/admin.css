@@ -323,6 +323,9 @@ body {
 .code-btn:active { background: rgba(255, 255, 255, .32); }
 .code-btn.danger { background: #fff; color: var(--red); }
 
+/* 机构卡片可多张（认证码 + 场地模式），相邻卡片留间距 */
+.code-card + .code-card { margin-top: 12px; }
+
 /* ===== 空态 ===== */
 .state { padding: 46px 20px; text-align: center; color: var(--text-sub); }
 .state-emoji { font-size: 40px; }

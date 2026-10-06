@@ -6,6 +6,7 @@ use App\Models\BookingRecord;
 use App\Models\FixedSchedule;
 use App\Support\BookingWindow;
 use App\Support\FixedSchedulePrecheck;
+use App\Support\VenuePolicy;
 use App\Support\VenueSlots;
 use Carbon\Carbon;
 use Illuminate\Support\Collection;
@@ -24,15 +25,39 @@ class BookingService
     /** 场地空闲查询 */
     private readonly VenueAvailabilityService $availability;
 
+    /** 机构场地模式：不按场地排课的机构（游泳馆/棋院）全程跳过场地逻辑 */
+    private readonly VenuePolicy $venuePolicy;
+
     public function __construct(
         private readonly FixedSchedulePrecheck $precheck = new FixedSchedulePrecheck,
         ?VenueAvailabilityService $availability = null,
+        ?VenuePolicy $venuePolicy = null,
     ) {
         $this->venues = (array) config(
             'doubao.booking.auto_assign_venues',
             config('doubao.booking.venues', ['1A', '1B', '2A', '2B'])
         );
         $this->availability = $availability ?? new VenueAvailabilityService;
+        $this->venuePolicy = $venuePolicy ?? new VenuePolicy;
+    }
+
+    /**
+     * 当前机构是否需要场地（网球馆等 true；游泳馆、棋院等 false）
+     */
+    public function requiresVenue(): bool
+    {
+        return $this->venuePolicy->requiresVenue();
+    }
+
+    /**
+     * 场地文案片段：场地为空（不按场地排课的机构）时返回空串，
+     * 避免输出「约课成功：小明 10-01 10:00 场地 」这种拖尾。
+     */
+    private function venueText(?string $venue, string $prefix = ' '): string
+    {
+        $venue = trim((string) $venue);
+
+        return $venue === '' ? '' : $prefix.'场地 '.$venue;
     }
 
     /**
@@ -66,7 +91,10 @@ class BookingService
         $duration = (int) config('doubao.booking.duration_minutes', 60);
         $endAt = $startAt->copy()->addMinutes($duration);
 
-        $venue = trim((string) ($data['venue'] ?? ''));
+        // 不按场地排课的机构（游泳馆 / 棋院）：场地一律留空，也不做场地相关校验。
+        // 调用方（AI、Excel）即便仍带 venue 过来也静默忽略，不报错、不落库。
+        $needsVenue = $this->requiresVenue();
+        $venue = $needsVenue ? trim((string) ($data['venue'] ?? '')) : '';
         $coach = trim((string) ($data['coach_name'] ?? ''));
 
         // 入参校验：指定了场地就必须在白名单内；时间必须落在营业时段内
@@ -103,13 +131,15 @@ class BookingService
                     'booking' => null,
                     'conflict' => $coachConflict,
                     'message' => '教练冲突：教练「'.$coach.'」在 '.$startAt->format('m月d日 H:i')
-                        .' 已有课（'.$coachConflict->student_name.' · 场地 '.$coachConflict->venue.'），'
+                        .' 已有课（'.$coachConflict->student_name.$this->venueText($coachConflict->venue, ' · ').'），'
                         .'同一时间只能带一个学员，请换个时间。',
                 ];
             }
         }
 
-        if ($venue === '') {
+        if (! $needsVenue) {
+            // 不按场地排课的机构：不自动分配、不做场地冲突检测，教练冲突与营业时段已校验完
+        } elseif ($venue === '') {
             // 自动分配：挑第一个空闲场地
             foreach ($this->venues as $v) {
                 if (! $this->checkConflict($v, $startAt, $endAt)) {
@@ -158,7 +188,7 @@ class BookingService
         $profileCreated = $this->ensureStudentProfile($studentName, $coach);
 
         $message = '约课成功：'.$booking->student_name.'（教练 '.$booking->coach_name.'）'
-            .$booking->start_at->format('m月d日 H:i').' 场地 '.$booking->venue;
+            .$booking->start_at->format('m月d日 H:i').$this->venueText($booking->venue);
 
         // 仅本次真的新建了档案时提示补手机号，老学员的约课文案保持不变
         if ($profileCreated) {
@@ -271,9 +301,12 @@ class BookingService
             // 与 create() 同口径：入库前先做别名归一
             ? app(CoachService::class)->resolveCoachName(trim($data['coach_name']))
             : $booking->coach_name;
-        $newVenue = array_key_exists('venue', $data) && $data['venue']
-            ? trim($data['venue'])
-            : $booking->venue;
+        // 不按场地排课的机构：强制置空。历史脏数据（venue 还有值）在本次修改时一并清掉，
+        // 保证同一机构里"有场地/没场地"两种记录不会混着出现。
+        $needsVenue = $this->requiresVenue();
+        $newVenue = $needsVenue
+            ? (array_key_exists('venue', $data) && $data['venue'] ? trim($data['venue']) : $booking->venue)
+            : '';
 
         $duration = (int) config('doubao.booking.duration_minutes', 60);
         $newEndAt = $newStartAt->copy()->addMinutes($duration);
@@ -284,7 +317,7 @@ class BookingService
 
         // 与 create() 同口径的入参校验：只在字段真的被改动时校验，
         // 避免历史脏数据（如早期写进来的未登记场地）卡住其它合法修改
-        if ($venueChanged) {
+        if ($venueChanged && $needsVenue) {
             $error = $this->validateVenue($newVenue);
             if ($error !== '') {
                 return ['success' => false, 'booking' => $booking, 'message' => '修改失败，'.$error];
@@ -298,8 +331,8 @@ class BookingService
             }
         }
 
-        // 时间或场地变化 → 场地冲突检测
-        if ($timeChanged || $venueChanged) {
+        // 时间或场地变化 → 场地冲突检测（不按场地排课的机构跳过）
+        if ($needsVenue && ($timeChanged || $venueChanged)) {
             $conflict = $this->checkConflict($newVenue, $newStartAt, $newEndAt, $booking->id);
             if ($conflict) {
                 return [
@@ -344,7 +377,7 @@ class BookingService
             'success' => true,
             'booking' => $booking,
             'message' => '修改成功：'.$booking->student_name.'（教练 '.$booking->coach_name.'）'
-                .$booking->start_at->format('m月d日 H:i').' 场地 '.$booking->venue,
+                .$booking->start_at->format('m月d日 H:i').$this->venueText($booking->venue),
         ];
     }
 
@@ -368,7 +401,7 @@ class BookingService
             return ['success' => false, 'message' => '找不到要删除的约课记录'];
         }
 
-        $info = $booking->student_name.'（'.$booking->coach_name.'）'.$booking->start_at->format('m月d日 H:i').' '.$booking->venue;
+        $info = $booking->student_name.'（'.$booking->coach_name.'）'.$booking->start_at->format('m月d日 H:i').$this->venueText($booking->venue);
 
         if ($booking->fixed_schedule_id && $booking->start_at->gt(Carbon::now('Asia/Shanghai'))) {
             $booking->status = BookingRecord::STATUS_CANCELLED;
@@ -400,7 +433,7 @@ class BookingService
             'success' => true,
             'booking' => $booking,
             'message' => '已标记完成：'.$booking->student_name.'（'.$booking->coach_name.'）'
-                .$booking->start_at->format('m月d日 H:i').' '.$booking->venue,
+                .$booking->start_at->format('m月d日 H:i').$this->venueText($booking->venue),
         ];
     }
 
@@ -418,6 +451,12 @@ class BookingService
      */
     public function checkConflict(string $venue, Carbon $startAt, Carbon $endAt, ?int $ignoreId = null): BookingRecord|FixedSchedule|null
     {
+        // 不按场地排课的机构：场地不是硬资源，任何时段都不构成场地冲突
+        // （放在这里兜底，固定场预检等所有调用点都自动生效）
+        if (! $this->requiresVenue()) {
+            return null;
+        }
+
         $slots = $this->venueSlots($venue);
 
         $conflict = BookingRecord::whereIn('venue', $slots)
@@ -824,7 +863,7 @@ class BookingService
 
         // 多条匹配 → 列出候选项，请用户补充信息
         $list = $candidates
-            ->map(fn (BookingRecord $b) => '· '.$b->student_name.'（'.$b->coach_name.'）'.$b->start_at->format('n月j日 H:i').' · '.$b->venue)
+            ->map(fn (BookingRecord $b) => '· '.$b->student_name.'（'.$b->coach_name.'）'.$b->start_at->format('n月j日 H:i').$this->venueText($b->venue, ' · '))
             ->implode("\n");
 
         return [

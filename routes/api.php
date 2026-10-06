@@ -42,6 +42,7 @@ Route::middleware('auth')->group(function () {
         // 机构与机构认证码
         Route::get('/organization', [AdminOrganizationController::class, 'show']);
         Route::post('/organization/reset-auth-code', [AdminOrganizationController::class, 'resetAuthCode']);
+        Route::post('/organization/venue-mode', [AdminOrganizationController::class, 'venueMode']);
 
         // 用户管理
         Route::get('/users', [AdminUserController::class, 'index']);

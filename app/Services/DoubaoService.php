@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\VenuePolicy;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -20,12 +21,14 @@ class DoubaoService
     private string $baseUrl;
     private string $apiKey;
     private int $timeout;
+    private readonly VenuePolicy $venuePolicy;
 
-    public function __construct()
+    public function __construct(?VenuePolicy $venuePolicy = null)
     {
         $this->baseUrl = (string) config('doubao.base_url');
         $this->apiKey = (string) config('doubao.api_key');
         $this->timeout = (int) config('doubao.timeout', 90);
+        $this->venuePolicy = $venuePolicy ?? new VenuePolicy;
     }
 
     /* -----------------------------------------------------------------
@@ -132,14 +135,43 @@ class DoubaoService
      | ----------------------------------------------------------------- */
 
     /**
-     * 解析用户消息 / 聊天截图，得到结构化约课动作
+     * 场地相关的提示词片段（按机构场地模式切换）
      *
-     * @param  string  $userText
-     * @param  string|null  $imageRef  聊天截图：本地文件绝对路径或可访问 URL（本地路径会自动转 base64 data URI）
-     * @param  string  $bookingsJson  当前约课数据 JSON，用于上下文
-     * @return array  ['intent' => ..., 'data' => [...], 'reply' => ...]
+     * required 模式的文案与改造前逐字一致（既有机构零变化）；
+     * none 模式（游泳馆 / 棋院）去掉场地要求与场地空闲查询，把"什么时候有空"一律引导到
+     * coach_availability，避免 AI 反复追问用户要哪个场地。
+     *
+     * @return array{0: string, 1: string, 2: string, 3: string, 4: string}
+     *         venue 字段说明 / query_type 列表项 / 场地查询规则 / 固定场改场地示例 / update new_data 示例
      */
-    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson, string $crmJson = '', string $fixedJson = ''): array
+    private function venueHints(bool $needsVenue): array
+    {
+        if (! $needsVenue) {
+            return [
+                '场地：本机构不按场地排课，始终填空字符串；不要询问用户要哪个场地，也不要在回答里提场地',
+                '- 本机构不按场地排课：不要输出 venue_availability；用户问"什么时候有空/还有哪些时段能约"一律用 coach_availability（教练姓名填 coach_name）',
+                '- 本机构不按场地排课：不要反问用户查哪个场地；问空闲/有没有空一律用 coach_availability，按教练的空闲时段作答',
+                '',
+                '',
+            ];
+        }
+
+        return [
+            '场地，开发区用 1A/1B/2A/2B（半场）或 1/2（整场 AB）；其它区域用 龙安湖/余之城/一小/信达/教育学院。用户指定才填，否则空字符串',
+            '- venue_availability —— 场地空闲查询（如"1A场地明天有空吗"、"明天有哪些空场"、"查询当天空闲场地"；问"所有/全部场地""当天空闲场地"时 venue 留空，系统会列出开发区 1/2 号场地的整场与半场空闲时段）',
+            "- 场地查询同时支持半场 1A/1B/2A/2B 与整场 1/2：开发区只有 1 号、2 号两个场地，整场 1 = 1A+1B（\"不拼\"：整场被占用时 1A/1B 都不可约；任一半场被占用时整场也不可约，但另一半场仍可拼）；其它区域场地填 龙安湖/余之城/一小/信达/教育学院\n"
+            .'- 用户问"当天空闲场地/有哪些空场"且没点名场地时：venue 留空、date_from 与 date_to 都填用户问的那一天（说"今天"就都填今天），系统会按时段列出各场地的空闲情况，不要反问用户查哪个场地',
+            '- 示例："把小明以后都换到2号场地" → intent=update、scope=future、student_name=小明、new_data={"venue": "2"}',
+            '、{"venue": "1A"}',
+        ];
+    }
+
+    /**
+     * 提示词里的时间上下文：当前时间、本周日期对照表、当前登录用户
+     *
+     * @return array{0: string, 1: string, 2: string}  [$now, $weekBlock, $currentUserBlock]
+     */
+    private function timeContext(): array
     {
         $nowCarbon = now('Asia/Shanghai');
         $weekdayCn = '周'.['日', '一', '二', '三', '四', '五', '六'][$nowCarbon->dayOfWeek];
@@ -164,6 +196,28 @@ class DoubaoService
             ."- create 意图：用户没有明确说出教练是谁时，coach_name 填「{$currentUserName}」；用户明确说了其他教练则以用户说的为准\n"
             ."- update / delete / complete：用户说“我的课”时，coach_name 填「{$currentUserName}」\n";
 
+        return [$now, $weekBlock, $currentUserBlock];
+    }
+
+    /**
+     * 解析用户消息 / 聊天截图，得到结构化约课动作
+     *
+     * @param  string  $userText
+     * @param  string|null  $imageRef  聊天截图：本地文件绝对路径或可访问 URL（本地路径会自动转 base64 data URI）
+     * @param  string  $bookingsJson  当前约课数据 JSON，用于上下文
+     * @return array  ['intent' => ..., 'data' => [...], 'reply' => ...]
+     */
+    public function parseBookingAction(string $userText, ?string $imageRef, string $bookingsJson, string $crmJson = '', string $fixedJson = ''): array
+    {
+        [$now, $weekBlock, $currentUserBlock] = $this->timeContext();
+
+        // 场地相关提示按机构模式切换：
+        // 网球馆这类机构场地是硬资源（要分配、要判冲突）；游泳馆 / 棋院这类机构不按场地排课，
+        // 提示词里就不该再出现"场地"的要求与空闲查询，否则 AI 会一直追问用户要哪个场地。
+        // required 模式下各片段与改造前逐字一致，保证既有机构零变化。
+        [$venueFieldHint, $venueQueryLine, $venueQueryRules, $venueUpdateExample, $venueNewDataHint] =
+            $this->venueHints($this->venuePolicy->requiresVenue());
+
         $system = <<<PROMPT
 你是羽毛球馆约课管理助手，负责把用户的自然语言(或聊天截图中的文字)解析成结构化动作。
 当前时间：{$now}
@@ -183,13 +237,19 @@ class DoubaoService
 10. update_phone —— 登记/修改学员手机号（出现"手机号/电话/联系方式"，如"小明手机号13800000000""小明的电话改成13900000000"）
 11. other     —— 闲聊或其他无关内容
 
+create 意图强化规则（这里最容易判错，请严格执行）：
+- 凡是要"新增一次安排"的表达，intent 必须是 create，禁止判成 query 或 other。典型句式：
+  "给小明约明天下午3点"、"帮我约一节明天10点的课"、"明天下午3点排一节小明的课"、"给小明加一节周三19点的课"
+- 学员或时间有缺失，也仍然判 create（缺什么系统会自动追问用户补全），不要因为信息不全就降级成 query/other
+- 只有在用户明显是"提问"（有没有空、还剩几节、什么时候上课、是哪位教练等）时才用 query
+
 query 意图必须再细分 query_type（放在 data 中），规则如下：
 - count    —— 统计上了几节课（如"上了几节课/上过多少次课/还剩几节课"，统计已完成课程）
 - last     —— 上一次课是什么时候（如"上一次课/上次课/最近一次上课"）
 - next     —— 下一次课是什么时候（如"下次课/下一次什么时候上课"）
 - schedule —— 某学员/教练的排课安排（如"我什么时候上课/他这周有哪些课/课表"）
 - coach_availability —— 教练空闲查询（如"张教练今天有空吗/明天有没有课"）
-- venue_availability —— 场地空闲查询（如"1A场地明天有空吗"、"明天有哪些空场"、"查询当天空闲场地"；问"所有/全部场地""当天空闲场地"时 venue 留空，系统会列出开发区 1/2 号场地的整场与半场空闲时段）
+{$venueQueryLine}
 - general  —— 其他开放问题（无法归入以上类型时）
 
 你必须返回 JSON，格式如下：
@@ -200,7 +260,7 @@ query 意图必须再细分 query_type（放在 data 中），规则如下：
     "coach_name": "教练姓名；用户未明确说出教练且有当前登录用户时填该用户姓名，否则填空字符串",
     "start_at": "上课开始时间，格式 Y-m-d H:i，必须是完整可计算的时间",
     "remark": "备注，没有则空字符串",
-    "venue": "场地，开发区用 1A/1B/2A/2B（半场）或 1/2（整场 AB）；其它区域用 龙安湖/余之城/一小/信达/教育学院。用户指定才填，否则空字符串",
+    "venue": "{$venueFieldHint}",
     "target_id": "始终填 0（不要尝试在约课记录里查找 id，系统会自动按学员/时间匹配定位）",
     "scope": "update/delete 时的作用范围：once=只改这一次（默认，用户说“这周X/下周X”“这一次”“今天”）；future=以后每周都改（用户说“以后都”“每次”“每周固定的”“固定场”“从这个月起”）。其余意图填空字符串",
     "weekday": "周一=1 … 周日=7（scope=future 或用户说每周几时填写，否则填 0）",
@@ -235,7 +295,7 @@ CRM 意图识别规则（非常重要，新增意图）：
 - 示例："这周一小明不来了" → intent=delete、scope=once、student_name=小明、start_at=最近的那个周一该时间（系统只删这一次）
 - 示例："以后每周一10点的小明固定场取消" → intent=delete、scope=future、student_name=小明、weekday=1、start_time=10:00
 - 示例："以后小明周一10点改到11点" → intent=update、scope=future、student_name=小明、weekday=1、start_time=10:00、new_data={"start_time": "11:00", "start_at": "2026-09-21 11:00"}
-- 示例："把小明以后都换到2号场地" → intent=update、scope=future、student_name=小明、new_data={"venue": "2"}
+{$venueUpdateExample}
 - scope=future 时：定位用 weekday（必填）+ start_time（尽量填）+ student_name（有就填），并在 new_data 里给出要改成的新值（改时间要同时给出 start_at 与 start_time）
 - 判断不了是"这一次"还是"以后都"时，scope 填 once（改动最小、最安全）
 
@@ -251,14 +311,13 @@ query 意图的参数规则（非常重要）：
 - "教练什么时候有空"这类问题，教练姓名填到 coach_name；"场地有空"则场地名填到 venue
 - 场地/教练是否空闲、有哪些空场，一律用 intent=query + query_type=venue_availability / coach_availability，不要归到 general，也不要给 create
 - query 意图的 reply 必须写出结论（如"1A 明天 08:00-18:00 空闲"），禁止「好的，收到！」这类没有信息量的回复
-- 场地查询同时支持半场 1A/1B/2A/2B 与整场 1/2：开发区只有 1 号、2 号两个场地，整场 1 = 1A+1B（"不拼"：整场被占用时 1A/1B 都不可约；任一半场被占用时整场也不可约，但另一半场仍可拼）；其它区域场地填 龙安湖/余之城/一小/信达/教育学院
-- 用户问"当天空闲场地/有哪些空场"且没点名场地时：venue 留空、date_from 与 date_to 都填用户问的那一天（说"今天"就都填今天），系统会按时段列出各场地的空闲情况，不要反问用户查哪个场地
+{$venueQueryRules}
 - general 类型（开放问题/闲聊）：reply 字段直接给出完整、口语化的最终回答（1-3 句话，可引用约课 JSON 数据作答，不要编造），此时 reply 不是概括句而是最终答案
 
 修改/取消/完成时的定位规则（非常重要）：
 - 用户没说哪个学员、什么时间时（如只说"取消预约"），student_name 和 start_at 都填空字符串，不要猜，系统会提示用户补全
 - 用户只说了学员没说时间，或只说了时间没说学员，就按用户说的如实填，不要擅自补充
-- update 意图时：要改成的新内容放在 new_data 对象里（如 {"start_at": "2026-08-25 14:00"}、{"venue": "1A"}）；原记录由系统按学员/时间自动匹配，把原学员名、原时间如实填到 student_name/start_at 即可，不需要填 target_id
+- update 意图时：要改成的新内容放在 new_data 对象里（如 {"start_at": "2026-08-25 14:00"}{$venueNewDataHint}）；原记录由系统按学员/时间自动匹配，把原学员名、原时间如实填到 student_name/start_at 即可，不需要填 target_id
 PROMPT;
 
         // 用户消息 = 文字 + 可能的截图
@@ -298,6 +357,54 @@ PROMPT;
         }
 
         return $decoded;
+    }
+
+    /**
+     * 只做「约课指令 → create 参数」的解析（用于意图被误判时的抢救）
+     *
+     * 与 parseBookingAction 的区别：不做意图分类、只输出约课字段、temperature=0，
+     * 模型不需要在 11 种 intent 里做选择，误判概率大幅下降，返回也更小更快。
+     *
+     * @param  string  $userText  用户原话（本地已判定为约课指令）
+     * @param  string  $bookingsJson  当前约课数据 JSON，仅供参考姓名写法
+     * @return array<string, mixed>|null  解析出约课参数；失败或无法解析时返回 null
+     */
+    public function parseBookingCreate(string $userText, string $bookingsJson): ?array
+    {
+        [$now, $weekBlock, $currentUserBlock] = $this->timeContext();
+        [$venueFieldHint] = $this->venueHints($this->venuePolicy->requiresVenue());
+
+        $system = <<<PROMPT
+你是约课助手的输入解析器。用户这句话明确是一条【约新课】指令（不是提问、不是查询），请只提取约课所需字段。
+当前时间：{$now}
+{$weekBlock}
+{$currentUserBlock}
+
+只返回一个 JSON 对象，不要输出任何解释或多余文字：
+{
+  "student_name": "学员姓名，缺失填空字符串",
+  "coach_name": "教练姓名；用户未明确说出教练且有当前登录用户时填该用户姓名，否则填空字符串",
+  "start_at": "上课开始时间，格式 Y-m-d H:i",
+  "remark": "备注，没有则空字符串",
+  "venue": "{$venueFieldHint}"
+}
+
+规则：
+- start_at 结合当前时间与上面的"本周日期对照"换算成完整日期时间（默认课时 1 小时）；无法确定时填空字符串，不要编造
+- 用户没说的信息一律填空字符串，不要猜、不要替用户选择
+PROMPT;
+
+        $answer = $this->chatText($system, "用户原话：{$userText}\n\n当前全部约课记录(JSON，仅供核对姓名写法)：\n".$bookingsJson, 0.0);
+
+        // 模型可能用 ```json 代码块包一层，先剥掉再看
+        $raw = trim((string) $answer);
+        if (preg_match('/```(?:json)?\s*(.+?)```/s', $raw, $m) === 1) {
+            $raw = trim($m[1]);
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**
@@ -343,6 +450,8 @@ PROMPT;
 - 涉及具体时间时使用 Y-m-d H:i 格式，并换算成星期几
 - 回答简洁、口语化、友好
 - 如果数据不足，直接说明"目前没有查到相关约课记录"
+- 如果用户这句话其实是在下达操作指令（约课 / 改课 / 取消 / 完成课程），而不是提问，
+  不要回答"没有查到记录"，请回复引导语，例如："收到！请再说一次学员和上课时间（如：给小明约明天下午3点），我来帮你安排～"
 PROMPT;
 
         return $this->chatText($system, "问题：{$question}\n\n约课记录：\n{$bookingsJson}", 0.4);

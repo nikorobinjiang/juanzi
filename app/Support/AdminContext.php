@@ -190,6 +190,8 @@ class AdminContext
             'name' => $org->name,
             'auth_code' => $org->auth_code,
             'initialized' => $org->isInitialized(),
+            'venue_mode' => $org->venueMode(),
+            'venue_mode_label' => $org->venue_mode_label,
         ];
     }
 }
