@@ -2,7 +2,16 @@
 
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\WechatBindController;
 use Illuminate\Support\Facades\Route;
+
+// 微信绑定页：免登录，唯一的凭据是网页授权拿到的 openid（/wechat/names 会校验节流）
+Route::prefix('wechat')->group(function () {
+    Route::get('/bind', [WechatBindController::class, 'show'])->name('wechat.bind');
+    Route::post('/bind', [WechatBindController::class, 'submit'])->name('wechat.bind.store');
+    Route::post('/unbind', [WechatBindController::class, 'unbind'])->name('wechat.unbind');
+    Route::get('/names', [WechatBindController::class, 'names'])->name('wechat.names');
+});
 
 // 未登录：登录 / 注册
 Route::middleware('guest')->group(function () {
