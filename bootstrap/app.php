@@ -17,6 +17,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // 未登录访问页面时跳转登录页（API 请求期望 JSON，由异常处理器直接返回 401）
         $middleware->redirectGuestsTo(fn () => route('login'));
 
+        // 微信服务器配置的 POST 回调用不到 CSRF token，必须放行，否则微信收到 419
+        $middleware->validateCsrfTokens(except: [
+            'wechat/server',
+        ]);
+
         // 后台管理：admin = 总管理员与机构管理员均可；super.admin = 仅总管理员
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureAdminRole::class,

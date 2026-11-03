@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\WechatBindController;
+use App\Http\Controllers\WechatServerController;
 use Illuminate\Support\Facades\Route;
 
 // 微信绑定页：免登录，唯一的凭据是网页授权拿到的 openid（/wechat/names 会校验节流）
@@ -11,6 +12,10 @@ Route::prefix('wechat')->group(function () {
     Route::post('/bind', [WechatBindController::class, 'submit'])->name('wechat.bind.store');
     Route::post('/unbind', [WechatBindController::class, 'unbind'])->name('wechat.unbind');
     Route::get('/names', [WechatBindController::class, 'names'])->name('wechat.names');
+
+    // 服务号「服务器配置」回调：GET 校验签名，POST 接收消息（当前只回 success）
+    Route::get('/server', [WechatServerController::class, 'verify'])->name('wechat.server.verify');
+    Route::post('/server', [WechatServerController::class, 'handle'])->name('wechat.server.handle');
 });
 
 // 未登录：登录 / 注册
