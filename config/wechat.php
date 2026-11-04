@@ -58,6 +58,11 @@ return [
     ],
 
     /*
+     | 管理员微信 openid：关注公众号后由回调回复消息取得，用于发送测试 / 通知消息
+     */
+    'admin_openid' => env('WECHAT_ADMIN_OPENID', ''),
+
+    /*
      | 模板消息：fields 的 key 是模板里的真实关键词名，value 是卡片行标题
      */
     'templates' => [
@@ -89,6 +94,20 @@ return [
                 'keyword2' => '上课时段',
                 'keyword3' => '课时',
                 'keyword4' => '学员',
+            ],
+        ],
+
+        // 「课程预约成功通知」（模板编号 44586）：课程名称 / 时间 / 学员姓名 / 上课老师
+        // 无 first / remark 行，fields 的 key 必须与模板里的真实关键词名一致
+        'booking_success' => [
+            'id' => env('WECHAT_BOOKING_TEMPLATE_ID', ''),
+            'url' => env('WECHAT_BOOKING_TEMPLATE_URL', '/wechat/bind'),
+            'color' => '#173177',
+            'fields' => [
+                'thing1' => '课程名称',
+                'time4' => '时间',
+                'thing5' => '学员姓名',
+                'thing9' => '上课老师',
             ],
         ],
     ],
