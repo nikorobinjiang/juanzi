@@ -112,16 +112,14 @@ class WechatServerController extends Controller
     }
 
     /**
-     * 关注欢迎语：绑定页链接 + 关键词自助查询指引
+     * 关注欢迎语：附上学员 / 教练两个绑定页链接（链接由 APP_URL 生成）
      */
     private function welcomeText(): string
     {
         return "欢迎关注约刻！\n"
             ."点击链接绑定身份，即可接收第二天的上课提醒：\n"
             .'学员绑定：'.url('/wechat/bind')."\n"
-            .'教练绑定：'.url('/wechat/bind?role=coach')."\n"
-            ."回复「剩余课程」查询课程余量\n"
-            .'回复「已上课程」查看上课详情';
+            .'教练绑定：'.url('/wechat/bind?role=coach');
     }
 
     /**
