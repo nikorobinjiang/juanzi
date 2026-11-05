@@ -433,18 +433,17 @@ class LessonReminderService
      */
     private function buildStudentData(EloquentCollection $lessons, Collection $names, Carbon $date, string $orgCode): array
     {
-        $times = $lessons->map(fn (BookingRecord $b) => $this->clock($b->start_at).'-'.$this->clock($b->end_at));
         $coaches = $lessons->map(fn (BookingRecord $b) => trim((string) $b->coach_name))->filter()->unique()->values();
 
-        // time4 是 time 型字段：必须含年份（微信格式校验），且总长 ≤ 24 字符；
-        // 多节课汇总成「2026年11月6日 09:00 等 3 节」
-        $time4 = $lessons->count() > 1
-            ? $this->dateLabel($date).' '.$times->first().' 等 '.$lessons->count().' 节'
-            : $this->dateLabel($date).' '.$times->first();
+        // time4 是 time 型字段：微信只认「2026年11月6日 09:00」或「09:00」单个时间点，
+        // 带区间（- / 至）会被 47003 拒收 → 只放最早的开始时间；
+        // 多节课的课时数放进「课程名称」（thing 型自由文本）：「网球馆A 共3节」
+        $org = $this->orgName($orgCode);
+        $thing1 = $lessons->count() > 1 ? $org.' 共'.$lessons->count().'节' : $org;
 
         return $this->renderData('templates.booking_success', [
-            'thing1' => $this->orgName($orgCode),
-            'time4' => $time4,
+            'thing1' => $thing1,
+            'time4' => $this->dateLabel($date).' '.$this->clock($lessons->first()?->start_at),
             'thing5' => $names->isEmpty() ? '' : $this->joinList($names),
             'thing9' => $coaches->isEmpty() ? '待定' : $this->joinList($coaches),
         ]);
@@ -460,14 +459,13 @@ class LessonReminderService
     private function buildCoachData(EloquentCollection $lessons, Collection $names, Carbon $date, string $orgCode): array
     {
         $first = $this->clock($lessons->first()?->start_at);
-        $last = $this->clock($lessons->last()?->end_at);
         $students = $lessons->map(fn (BookingRecord $b) => trim((string) $b->student_name))->filter()->unique()->values();
 
         $org = $this->orgName($orgCode);
 
         return $this->renderData('templates.booking_success', [
             'thing1' => trim(($org !== '' ? $org.' ' : '').$lessons->count().' 节课'),
-            'time4' => $first !== '' && $last !== '' ? $this->dateLabel($date).' '.$first.'-'.$last : $this->dateLabel($date),
+            'time4' => $this->dateLabel($date).' '.$first,
             'thing5' => $students->isEmpty() ? '待定' : $this->joinList($students),
             'thing9' => $names->isEmpty() ? '待定' : $this->joinList($names),
         ]);

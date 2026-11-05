@@ -119,7 +119,8 @@ class LessonReminderTest extends TestCase
             && $request['touser'] === 'OPENID_STU'
             && $request['template_id'] === 'BOOK_TEMPLATE'
             && str_contains($request['data']['thing9']['value'], '王教练')
-            && str_contains($request['data']['time4']['value'], '09:00-10:00'));
+            && str_contains($request['data']['time4']['value'], '09:00')
+            && ! str_contains($request['data']['time4']['value'], '-'));
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_COACH'
@@ -151,7 +152,7 @@ class LessonReminderTest extends TestCase
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['data']['thing1']['value'] === '网球馆A 2 节课'
-            && str_contains($request['data']['time4']['value'], '09:00-15:00')
+            && str_contains($request['data']['time4']['value'], '09:00')
             && str_contains($request['data']['thing5']['value'], '小明')
             && ! isset($request['data']['remark']));
     }
@@ -272,7 +273,7 @@ class LessonReminderTest extends TestCase
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_PARENT'
             && str_contains($request['data']['time4']['value'], '09:00')
-            && str_contains($request['data']['time4']['value'], '等 2 节')
+            && str_contains($request['data']['thing1']['value'], '共2节')
             && str_contains($request['data']['thing5']['value'], '小红'));
 
         $this->assertSame(1, ReminderLog::withoutGlobalScope(OrganizationScope::class)
@@ -319,7 +320,8 @@ class LessonReminderTest extends TestCase
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_STU'
-            && str_contains($request['data']['time4']['value'], '18:30-19:30')
+            && str_contains($request['data']['time4']['value'], '18:30')
+            && ! str_contains($request['data']['time4']['value'], '-')
             && str_contains($request['data']['thing9']['value'], '王教练'));
 
         $this->assertSame(1, BookingRecord::withoutGlobalScope(OrganizationScope::class)
