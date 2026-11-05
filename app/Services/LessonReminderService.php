@@ -436,9 +436,10 @@ class LessonReminderService
         $times = $lessons->map(fn (BookingRecord $b) => $this->clock($b->start_at).'-'.$this->clock($b->end_at));
         $coaches = $lessons->map(fn (BookingRecord $b) => trim((string) $b->coach_name))->filter()->unique()->values();
 
-        // time4 是 time 型字段，必须带日期；多节课汇总成「N 月 N 日 最早时间 起 共 N 节」
+        // time4 是 time 型字段：必须含年份（微信格式校验），且总长 ≤ 24 字符；
+        // 多节课汇总成「2026年11月6日 09:00 等 3 节」
         $time4 = $lessons->count() > 1
-            ? $this->dateLabel($date).' '.$times->first().' 起 共 '.$lessons->count().' 节'
+            ? $this->dateLabel($date).' '.$times->first().' 等 '.$lessons->count().' 节'
             : $this->dateLabel($date).' '.$times->first();
 
         return $this->renderData('templates.booking_success', [
@@ -615,11 +616,13 @@ class LessonReminderService
         return $at->copy()->setTimezone(BookingWindow::TIMEZONE)->format('H:i');
     }
 
+    /**
+     * time 型字段的日期部分：必须带年份，否则微信 47003 拒收；
+     * 不带「周几」（省字符，且降低格式校验风险）
+     */
     private function dateLabel(Carbon $date): string
     {
-        $week = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'];
-
-        return $date->format('n月j日').' '.$week[$date->dayOfWeek];
+        return $date->format('Y年n月j日');
     }
 
     /**

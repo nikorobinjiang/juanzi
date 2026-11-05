@@ -272,7 +272,7 @@ class LessonReminderTest extends TestCase
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_PARENT'
             && str_contains($request['data']['time4']['value'], '09:00')
-            && str_contains($request['data']['time4']['value'], '共 2 节')
+            && str_contains($request['data']['time4']['value'], '等 2 节')
             && str_contains($request['data']['thing5']['value'], '小红'));
 
         $this->assertSame(1, ReminderLog::withoutGlobalScope(OrganizationScope::class)
