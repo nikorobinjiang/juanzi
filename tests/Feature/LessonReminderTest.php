@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\FixedSchedule;
 use App\Models\Organization;
 use App\Models\ReminderLog;
 use App\Models\WechatBinding;
@@ -288,6 +289,43 @@ class LessonReminderTest extends TestCase
         $this->artisan('bookings:remind', ['--only' => 'student'])->assertSuccessful();
 
         Http::assertSentCount(2);
+    }
+
+    /** 推送前自动补齐固定场：没人打开页面，明天的固定课也不会漏推 */
+    public function test_fixed_schedule_is_materialized_before_reminding(): void
+    {
+        $day = $this->tomorrow();
+        $weekday = $day->dayOfWeek === 0 ? 7 : $day->dayOfWeek;
+
+        FixedSchedule::withoutGlobalScope(OrganizationScope::class)->create([
+            'organization_code' => 'tennis_a',
+            'region' => FixedSchedule::REGION_DEVELOPMENT,
+            'venue' => '1A',
+            'weekday' => $weekday,
+            'start_time' => '18:30',
+            'end_time' => '19:30',
+            'student_name' => '小明',
+            'coach_name' => '王教练',
+            'is_student' => true,
+            'active' => true,
+            'effective_from' => BookingWindow::now()->startOfWeek(\Carbon\Carbon::MONDAY),
+            'effective_to' => BookingWindow::now()->addWeeks(2),
+        ]);
+
+        // 不手工创建 booking_records：证明是命令在推送前补齐出来的
+        $this->makeBinding('OPENID_STU', WechatBinding::TYPE_STUDENT, '小明');
+
+        $this->artisan('bookings:remind', ['--date' => $day->toDateString()])->assertSuccessful();
+
+        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
+            && $request['touser'] === 'OPENID_STU'
+            && str_contains($request['data']['time4']['value'], '18:30-19:30')
+            && str_contains($request['data']['thing9']['value'], '王教练'));
+
+        $this->assertSame(1, BookingRecord::withoutGlobalScope(OrganizationScope::class)
+            ->where('start_at', '>=', $day)
+            ->where('start_at', '<', $day->copy()->addDay())
+            ->count());
     }
 
     /** 预览模式不真正调用发送接口 */

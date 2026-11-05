@@ -2,7 +2,9 @@
 
 namespace App\Console\Commands;
 
+use App\Models\Organization;
 use App\Models\WechatBinding;
+use App\Services\FixedScheduleService;
 use App\Services\LessonReminderService;
 use App\Services\WechatService;
 use App\Support\BookingWindow;
@@ -56,6 +58,10 @@ class RemindTomorrowLessons extends Command
             $dryRun ? '预览（不发送）' : '发送'
         ));
 
+        // 固定场靠「打开页面」懒补齐，定时推送当天可能没人打开过系统；
+        // 查询前先为相关机构补齐固定场窗口，保证明天的固定课不漏推（幂等，可重复执行）
+        $this->ensureFixedSchedules($orgCode);
+
         try {
             $failureCount = 0;
 
@@ -86,6 +92,29 @@ class RemindTomorrowLessons extends Command
             ]);
 
             return self::FAILURE;
+        }
+    }
+
+    /**
+     * 为相关机构补齐固定场展开窗口
+     *
+     * 单个机构补齐失败只记日志，不阻断其余机构与推送本身。
+     */
+    private function ensureFixedSchedules(string $orgCode): void
+    {
+        $codes = Organization::query()
+            ->when($orgCode !== '', fn ($query) => $query->where('code', $orgCode))
+            ->pluck('code');
+
+        foreach ($codes as $code) {
+            try {
+                app(FixedScheduleService::class)->ensureWindow((string) $code);
+            } catch (\Throwable $e) {
+                Log::warning('上课提醒前固定场补齐失败', [
+                    'organization_code' => $code,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
