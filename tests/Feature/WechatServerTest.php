@@ -60,6 +60,31 @@ class WechatServerTest extends TestCase
             ->assertForbidden();
     }
 
+    /** 关注事件：被动回复欢迎语与学员/教练绑定链接 */
+    public function test_subscribe_event_replies_with_bind_links(): void
+    {
+        $xml = <<<'XML'
+<xml><ToUserName><![CDATA[gh_test_account]]></ToUserName><FromUserName><![CDATA[oSUB_openid_1]]></FromUserName><CreateTime>1730000000</CreateTime><MsgType><![CDATA[event]]></MsgType><Event><![CDATA[subscribe]]></Event></xml>
+XML;
+
+        $response = $this->call(
+            'POST',
+            '/wechat/server?'.http_build_query($this->signedQuery()),
+            [],
+            [],
+            [],
+            ['CONTENT_TYPE' => 'text/xml'],
+            $xml
+        );
+        $response->assertOk();
+
+        $content = $response->baseResponse->getContent() ?? '';
+        $this->assertStringContainsString('oSUB_openid_1', $content);
+        $this->assertStringContainsString('gh_test_account', $content);
+        $this->assertStringContainsString(url('/wechat/bind'), $content);
+        $this->assertStringContainsString(url('/wechat/bind?role=coach'), $content);
+    }
+
     /**
      * @return array{signature: string, timestamp: string, nonce: string}
      */

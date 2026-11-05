@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Log;
  *
  * 三件事：
  * 1. GET  -> 微信保存配置时的签名校验，原样回显 echostr
- * 2. POST -> 用户消息 / 事件推送；关注（subscribe）事件记录 openid 并回复告知，
+ * 2. POST -> 用户消息 / 事件推送；关注（subscribe）事件记录 openid，并回复欢迎语 + 绑定链接，
  *            其余一律回 success（表示不回复），避免 5 秒未响应被微信重试骚扰。
  * 3. openid 关联：学员 / 教练与 openid 的正式关联由 /wechat/bind 绑定页（网页授权）承担；
  *    这里只负责「关注即拿到 openid」，管理员 openid 由此回填 .env 的 WECHAT_ADMIN_OPENID。
@@ -50,7 +50,7 @@ class WechatServerController extends Controller
      * 用户消息 / 事件推送（POST）
      *
      * 验签通过后用 simplexml 解析明文 XML：
-     * - subscribe 事件：记录 openid 到日志，并被动回复一条文本告知用户自己的 openid
+     * - subscribe 事件：记录 openid 到日志，并被动回复欢迎语与绑定页链接
      * - unsubscribe 事件：仅记录日志
      * - 其余消息 / 解析失败：统一回 success，微信收到即认为已处理，不再重试
      */
@@ -76,7 +76,7 @@ class WechatServerController extends Controller
             if ($event === 'subscribe' && $openid !== '') {
                 Log::info('微信用户关注，openid 已捕获', ['openid' => $openid]);
 
-                return response($this->textReply($openid, $account, $openid), 200)
+                return response($this->textReply($openid, $account, $this->welcomeText()), 200)
                     ->header('Content-Type', 'text/plain');
             }
 
@@ -109,6 +109,17 @@ class WechatServerController extends Controller
         }
 
         return $message === false ? null : $message;
+    }
+
+    /**
+     * 关注欢迎语：附上学员 / 教练两个绑定页链接（链接由 APP_URL 生成）
+     */
+    private function welcomeText(): string
+    {
+        return "欢迎关注约刻！\n"
+            ."点击链接绑定身份，即可收到明天的上课提醒：\n"
+            .'学员绑定：'.url('/wechat/bind')."\n"
+            .'教练绑定：'.url('/wechat/bind?role=coach');
     }
 
     /**
