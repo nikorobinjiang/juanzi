@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\BookingRecord;
+use App\Models\Organization;
 use App\Models\ReminderLog;
 use App\Models\Scopes\OrganizationScope;
 use App\Models\WechatBinding;
@@ -28,6 +29,9 @@ class LessonReminderService
 
     /** 预览模式下积累的文本输出，交给命令统一打印 */
     private array $messages = [];
+
+    /** 机构 code => 机构名（课程名称字段用），单次运行内缓存避免重复查询 */
+    private array $orgNames = [];
 
     public function __construct(private WechatService $wechat)
     {
@@ -166,8 +170,8 @@ class LessonReminderService
             $date,
             $orgCode,
             $options,
-            fn (EloquentCollection $lessons, Collection $names) => $this->buildStudentData($lessons, $names, $date),
-            'templates.student'
+            fn (EloquentCollection $lessons, Collection $names, string $orgCode) => $this->buildStudentData($lessons, $names, $date, $orgCode),
+            'templates.booking_success'
         );
     }
 
@@ -183,8 +187,8 @@ class LessonReminderService
             $date,
             $orgCode,
             $options,
-            fn (EloquentCollection $lessons, Collection $names) => $this->buildCoachData($lessons, $names, $date),
-            'templates.coach'
+            fn (EloquentCollection $lessons, Collection $names, string $orgCode) => $this->buildCoachData($lessons, $names, $date, $orgCode),
+            'templates.booking_success'
         );
     }
 
@@ -200,7 +204,8 @@ class LessonReminderService
         $force = (bool) ($options['force'] ?? false);
         $perLesson = (bool) ($options['per_lesson'] ?? false) && $type === WechatBinding::TYPE_STUDENT;
 
-        $templateId = $this->templateId($configKey, $type);
+        $templateId = $this->templateId($configKey);
+        $url = $this->templateUrl($configKey);
         $stats = array_fill_keys(self::KEYS, 0);
         $this->messages = [];
 
@@ -252,7 +257,8 @@ class LessonReminderService
                         (string) $scopeKey,
                         $scopeLessons,
                         $templateId,
-                        $render($scopeLessons, $names),
+                        $url,
+                        $render($scopeLessons, $names, (string) $groupOrgCode),
                         $dryRun,
                         $stats
                     );
@@ -282,6 +288,7 @@ class LessonReminderService
         string $scopeKey,
         EloquentCollection $lessons,
         string $templateId,
+        string $url,
         array $data,
         bool $dryRun,
         array &$stats
@@ -296,7 +303,7 @@ class LessonReminderService
             return;
         }
 
-        $result = $this->wechat->sendTemplateMessage($openid, $templateId, $data, $this->templateUrl($type));
+        $result = $this->wechat->sendTemplateMessage($openid, $templateId, $data, $url);
 
         $status = $result['ok'] ? ReminderLog::STATUS_SENT : ReminderLog::STATUS_FAILED;
         $stats[$result['ok'] ? 'sent' : 'failed']++;
@@ -418,53 +425,70 @@ class LessonReminderService
      | ----------------------------------------------------------------- */
 
     /**
-     * 学员卡片数据
+     * 学员卡片数据（booking_success 模板：课程名称 / 时间 / 学员姓名 / 上课老师）
      *
      * @param  EloquentCollection<int, BookingRecord>  $lessons
      * @param  Collection<int, string>  $names
      * @return array<string, array{value: string, color: string}>
      */
-    private function buildStudentData(EloquentCollection $lessons, Collection $names, Carbon $date): array
+    private function buildStudentData(EloquentCollection $lessons, Collection $names, Carbon $date, string $orgCode): array
     {
         $times = $lessons->map(fn (BookingRecord $b) => $this->clock($b->start_at).'-'.$this->clock($b->end_at));
-        $venues = $lessons->map(fn (BookingRecord $b) => trim((string) $b->venue))->filter()->unique()->values();
         $coaches = $lessons->map(fn (BookingRecord $b) => trim((string) $b->coach_name))->filter()->unique()->values();
 
-        return $this->renderData('templates.student', [
-            'keyword1' => $this->dateLabel($date),
-            'keyword2' => $lessons->count() > 1 ? $this->joinList($times) : ($times->first() ?: ''),
-            'keyword3' => $venues->isEmpty() ? '待定' : $venues->implode('、'),
-            'keyword4' => $coaches->isEmpty() ? '待定' : $coaches->implode('、'),
+        // time4 是 time 型字段，必须带日期；多节课汇总成「N 月 N 日 最早时间 起 共 N 节」
+        $time4 = $lessons->count() > 1
+            ? $this->dateLabel($date).' '.$times->first().' 起 共 '.$lessons->count().' 节'
+            : $this->dateLabel($date).' '.$times->first();
+
+        return $this->renderData('templates.booking_success', [
+            'thing1' => $this->orgName($orgCode),
+            'time4' => $time4,
+            'thing5' => $names->isEmpty() ? '' : $this->joinList($names),
+            'thing9' => $coaches->isEmpty() ? '待定' : $this->joinList($coaches),
         ]);
     }
 
     /**
-     * 教练卡片数据
+     * 教练卡片数据（booking_success 模板：课程名称 / 时间 / 学员姓名 / 上课老师）
      *
      * @param  EloquentCollection<int, BookingRecord>  $lessons
      * @param  Collection<int, string>  $names
      * @return array<string, array{value: string, color: string}>
      */
-    private function buildCoachData(EloquentCollection $lessons, Collection $names, Carbon $date): array
+    private function buildCoachData(EloquentCollection $lessons, Collection $names, Carbon $date, string $orgCode): array
     {
         $first = $this->clock($lessons->first()?->start_at);
         $last = $this->clock($lessons->last()?->end_at);
-        $venues = $lessons->map(fn (BookingRecord $b) => trim((string) $b->venue))->filter()->unique()->values();
         $students = $lessons->map(fn (BookingRecord $b) => trim((string) $b->student_name))->filter()->unique()->values();
 
-        // 教练模板只有四个关键词，场地塞不进去，统一挂到备注行末尾
-        $remark = trim((string) config('wechat.templates.coach.remark', ''));
+        $org = $this->orgName($orgCode);
 
-        return $this->renderData('templates.coach', [
-            'keyword1' => $this->dateLabel($date),
-            'keyword2' => $first && $last ? $first.'-'.$last : '',
-            'keyword3' => $lessons->count().' 节',
-            'keyword4' => $students->isEmpty() ? '待定' : $this->joinList($students),
-        ], trim($remark.' 场地：'.($venues->isEmpty() ? '待定' : $venues->implode('、'))));
+        return $this->renderData('templates.booking_success', [
+            'thing1' => trim(($org !== '' ? $org.' ' : '').$lessons->count().' 节课'),
+            'time4' => $first !== '' && $last !== '' ? $this->dateLabel($date).' '.$first.'-'.$last : $this->dateLabel($date),
+            'thing5' => $students->isEmpty() ? '待定' : $this->joinList($students),
+            'thing9' => $names->isEmpty() ? '待定' : $this->joinList($names),
+        ]);
+    }
+
+    /**
+     * 机构名（课程名称字段的数据源），机构不存在时返回「明日课程」兜底
+     */
+    private function orgName(string $orgCode): string
+    {
+        if (! array_key_exists($orgCode, $this->orgNames)) {
+            $this->orgNames[$orgCode] = trim((string) Organization::query()->where('code', $orgCode)->value('name'));
+        }
+
+        return $this->orgNames[$orgCode] !== '' ? $this->orgNames[$orgCode] : '明日课程';
     }
 
     /**
      * 按模板配置把「关键词名 => 值」渲染成微信要求的 data 结构
+     *
+     * first / remark 为空时直接不输出：booking_success 这类没有首尾行的模板，
+     * 多传空 first/remark 会被微信拒收（47003）。
      *
      * @param  array<string, string>  $values
      * @return array<string, array{value: string, color: string}>
@@ -477,19 +501,29 @@ class LessonReminderService
 
         $mapping = (array) config($base.'.fields', []);
 
-        $data = ['first' => ['value' => $first, 'color' => $color]];
+        $data = [];
+
+        if ($first !== '') {
+            $data['first'] = ['value' => $first, 'color' => $color];
+        }
 
         foreach ($mapping as $key => $label) {
             $value = $values[(string) $key] ?? '';
 
             // 空值也占位，保证卡片行数与模板关键词数量一致，否则微信会报 47003
+            // thing 型字段限 20 字符，超长直接截断（时间字段另在组装处保证格式与长度）
+            if (str_starts_with((string) $key, 'thing')) {
+                $value = mb_substr($value, 0, 20);
+            }
+
             $data[(string) $key] = ['value' => $value === '' ? '—' : $value, 'color' => $color];
         }
 
-        $data['remark'] = [
-            'value' => $remark ?? (string) config($base.'.remark', ''),
-            'color' => $color,
-        ];
+        $remark = $remark ?? (string) config($base.'.remark', '');
+
+        if ($remark !== '') {
+            $data['remark'] = ['value' => $remark, 'color' => $color];
+        }
 
         return $data;
     }
@@ -499,22 +533,16 @@ class LessonReminderService
      | ----------------------------------------------------------------- */
 
     /**
-     * 模板 ID：教练未单独配置时回退学员模板，避免上线后因为少配一个模板而整条流水线空转
+     * 模板 ID：学员与教练共用同一张 booking_success 模板
      */
-    private function templateId(string $configKey, string $type): string
+    private function templateId(string $configKey): string
     {
-        $id = trim((string) config('wechat.'.$configKey.'.id'));
-
-        if ($id === '' && $type === WechatBinding::TYPE_COACH) {
-            $id = trim((string) config('wechat.templates.student.id'));
-        }
-
-        return $id;
+        return trim((string) config('wechat.'.$configKey.'.id'));
     }
 
-    private function templateUrl(string $type): string
+    private function templateUrl(string $configKey): string
     {
-        $path = trim((string) config('wechat.templates.'.$type.'.url', ''));
+        $path = trim((string) config('wechat.'.$configKey.'.url', ''));
 
         return $path === '' ? '' : url($path);
     }

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\Organization;
 use App\Models\ReminderLog;
 use App\Models\WechatBinding;
 use App\Models\BookingRecord;
@@ -32,11 +33,12 @@ class LessonReminderTest extends TestCase
 
         config()->set('wechat.app_id', 'wxappid');
         config()->set('wechat.secret', 'wxsecret');
-        config()->set('wechat.templates.student.id', 'STU_TEMPLATE');
-        config()->set('wechat.templates.coach.id', 'COACH_TEMPLATE');
+        config()->set('wechat.templates.booking_success.id', 'BOOK_TEMPLATE');
         config()->set('wechat.remind.student_enabled', true);
         config()->set('wechat.remind.coach_enabled', true);
         config()->set('wechat.remind.per_lesson', false);
+
+        Organization::firstOrCreate(['code' => 'tennis_a'], ['name' => '网球馆A']);
 
         $this->fakeWechat();
     }
@@ -114,13 +116,14 @@ class LessonReminderTest extends TestCase
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_STU'
-            && $request['template_id'] === 'STU_TEMPLATE'
-            && str_contains($request['data']['keyword4']['value'], '王教练'));
+            && $request['template_id'] === 'BOOK_TEMPLATE'
+            && str_contains($request['data']['thing9']['value'], '王教练')
+            && str_contains($request['data']['time4']['value'], '09:00-10:00'));
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_COACH'
-            && $request['template_id'] === 'COACH_TEMPLATE'
-            && str_contains($request['data']['keyword4']['value'], '小明'));
+            && $request['template_id'] === 'BOOK_TEMPLATE'
+            && str_contains($request['data']['thing5']['value'], '小明'));
 
         $this->assertSame(2, ReminderLog::withoutGlobalScope(OrganizationScope::class)
             ->where('remind_date', $this->tomorrow()->toDateString())
@@ -146,10 +149,10 @@ class LessonReminderTest extends TestCase
         Http::assertSentCount(2); // 1 次取 token + 1 条教练卡片
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
-            && $request['data']['keyword3']['value'] === '2 节'
-            && $request['data']['keyword2']['value'] === '09:00-15:00'
-            && str_contains($request['data']['keyword4']['value'], '小明')
-            && str_contains($request['data']['remark']['value'], '1A'));
+            && $request['data']['thing1']['value'] === '网球馆A 2 节课'
+            && str_contains($request['data']['time4']['value'], '09:00-15:00')
+            && str_contains($request['data']['thing5']['value'], '小明')
+            && ! isset($request['data']['remark']));
     }
 
     /** 同一天重复执行不会重复打扰用户 */
@@ -244,8 +247,7 @@ class LessonReminderTest extends TestCase
     /** 未配置模板 ID 时整条流水线静默跳过，不会空转也不会报错 */
     public function test_missing_template_id_skips_without_error(): void
     {
-        config()->set('wechat.templates.student.id', '');
-        config()->set('wechat.templates.coach.id', '');
+        config()->set('wechat.templates.booking_success.id', '');
 
         $this->makeBooking();
         $this->makeBinding('OPENID_STU', WechatBinding::TYPE_STUDENT, '小明');
@@ -253,20 +255,6 @@ class LessonReminderTest extends TestCase
         $this->artisan('bookings:remind')->assertSuccessful();
 
         Http::assertSentCount(0);
-    }
-
-    /** 教练模板未单独配置时回退到学员模板 */
-    public function test_coach_falls_back_to_student_template(): void
-    {
-        config()->set('wechat.templates.coach.id', '');
-
-        $this->makeBooking();
-        $this->makeBinding('OPENID_COACH', WechatBinding::TYPE_COACH, '王教练');
-
-        $this->artisan('bookings:remind', ['--only' => 'coach'])->assertSuccessful();
-
-        Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
-            && $request['template_id'] === 'STU_TEMPLATE');
     }
 
     /** 同一个微信绑定两个孩子时合并成一条卡片 */
@@ -282,8 +270,9 @@ class LessonReminderTest extends TestCase
 
         Http::assertSent(fn (Request $request) => str_contains($request->url(), 'message/template/send')
             && $request['touser'] === 'OPENID_PARENT'
-            && str_contains($request['data']['keyword2']['value'], '09:00-10:00')
-            && str_contains($request['data']['keyword2']['value'], '14:00-15:00'));
+            && str_contains($request['data']['time4']['value'], '09:00')
+            && str_contains($request['data']['time4']['value'], '共 2 节')
+            && str_contains($request['data']['thing5']['value'], '小红'));
 
         $this->assertSame(1, ReminderLog::withoutGlobalScope(OrganizationScope::class)
             ->where('openid', 'OPENID_PARENT')
