@@ -40,6 +40,33 @@ return [
     ],
 
     /*
+     | 微信小程序（拼课团课）：凭证与服务号完全隔离，避免 token 互相作废
+     */
+    'miniapp' => [
+        'app_id' => env('WECHAT_MINIAPP_APP_ID', ''),
+        'secret' => env('WECHAT_MINIAPP_SECRET', ''),
+        'access_token' => [
+            'cache_key' => 'wechat:miniapp:access_token',
+            'lock_key' => 'wechat:miniapp:access_token:lock',
+            'lock_seconds' => 10,
+            'refresh_margin' => 300,
+        ],
+        'qrcode_cache_minutes' => (int) env('WECHAT_MINIAPP_QRCODE_CACHE_MINUTES', 60),
+        'detail_page' => 'pages/activity/detail/index',
+        'h5_url' => env('MINIAPP_H5_URL', 'https://www.juanzi.site'),
+    ],
+
+    /*
+     | H5 拉起小程序用的 JS-SDK 签名 ticket（复用服务号 token）
+     */
+    'jsapi_ticket' => [
+        'cache_key' => 'wechat:jsapi_ticket',
+        'lock_key' => 'wechat:jsapi_ticket:lock',
+        'lock_seconds' => 10,
+        'refresh_margin' => 300,
+    ],
+
+    /*
      | 服务器配置（公众平台 → 设置与开发 → 基本配置 → 服务器配置）
      | 仅用于接收消息推送；上课提醒是主动推送，不依赖此处。Token 需与后台填写的一致。
      */

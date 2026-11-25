@@ -26,6 +26,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'admin' => \App\Http\Middleware\EnsureAdminRole::class,
             'super.admin' => \App\Http\Middleware\EnsureSuperAdminRole::class,
+            // 小程序：机构人员 token 与客户 token 分开校验，避免 customer 调机构接口
+            'miniapp.staff' => \App\Http\Middleware\EnsureMiniappStaff::class,
+            'miniapp.customer' => \App\Http\Middleware\EnsureMiniappCustomer::class,
         ]);
 
         // API 复用 web 登录态：api 组默认没有 session 中间件，/api/* 请求读不到登录 session

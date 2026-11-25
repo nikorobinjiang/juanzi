@@ -1,0 +1,47 @@
+<view class="page staff-page">
+  <view class="staff-header">
+    <view>
+      <view class="staff-title">拼课管理</view>
+      <view class="staff-sub">{{user.organization_name || '机构人员'}} · 共 {{activities.length}} 个活动</view>
+    </view>
+    <view class="staff-avatar">机</view>
+  </view>
+
+  <button class="primary-btn create-btn" bindtap="goCreate">＋ 创建新拼课</button>
+
+  <view class="activity-list" wx:if="{{activities.length > 0}}">
+    <view class="card activity-card" wx:for="{{activities}}" wx:key="id">
+      <view class="card-head">
+        <view class="tag {{item.status}}">{{item.status_label}}</view>
+        <view class="activity-date">{{item.created_at}}</view>
+      </view>
+
+      <view class="activity-title">{{item.title}}</view>
+      <view class="activity-meta">{{item.venue || '未填写校区'}} · {{item.starts_at || '时间待定'}}</view>
+
+      <view class="progress-line">
+        <view class="progress-track">
+          <view class="progress-fill" style="width: {{item.percent}}%"></view>
+        </view>
+        <text class="progress-text">{{item.signed_up_count}}/{{item.capacity}} 人</text>
+      </view>
+
+      <view class="card-actions">
+        <view class="action" bindtap="goPoster" data-token="{{item.share_token}}">分享海报</view>
+        <view class="action" bindtap="showSignups" data-id="{{item.id}}">报名名单</view>
+        <view class="action" bindtap="goEdit" data-id="{{item.id}}" data-token="{{item.share_token}}">编辑</view>
+        <view class="action primary" wx:if="{{item.status === 'draft'}}" bindtap="publish" data-id="{{item.id}}">发布</view>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:elif="{{!loading}}">
+    <view class="empty-title">还没有拼课活动</view>
+    <view>点击上方按钮创建第一个拼课吧</view>
+  </view>
+
+  <view class="loading-view" wx:if="{{loading}}">
+    <view class="skeleton"></view>
+    <view class="skeleton"></view>
+  </view>
+</view>

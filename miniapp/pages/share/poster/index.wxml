@@ -1,0 +1,23 @@
+<view class="page poster-page">
+  <view class="poster-tip">
+    <view class="tip-icon">✦</view>
+    <view>
+      <view class="tip-title">海报已准备好</view>
+      <view class="tip-sub">保存到相册后即可发朋友圈，邀请好友一起拼课</view>
+    </view>
+  </view>
+
+  <view class="canvas-wrap">
+    <canvas type="2d" id="poster" class="poster-canvas"></canvas>
+    <view class="canvas-loading" wx:if="{{drawing}}">正在生成海报…</view>
+  </view>
+
+  <view class="poster-actions">
+    <button class="primary-btn" loading="{{saving}}" bindtap="savePoster">保存海报到相册</button>
+    <view class="action-row">
+      <button class="secondary-btn" bindtap="copyH5Link">复制 H5 链接</button>
+      <button class="secondary-btn" open-type="share">分享给好友</button>
+    </view>
+    <view class="poster-hint">微信小程序暂不支持一键发朋友圈，请保存图片后自行发布。</view>
+  </view>
+</view>

@@ -1,0 +1,46 @@
+<view class="page mine-page">
+  <view class="mine-header">
+    <view class="mine-title">我的拼课</view>
+    <view class="mine-subtitle">每一次报名，都有同伴一起出发</view>
+  </view>
+
+  <view class="filter-bar">
+    <view class="filter-item {{filter === 'all' ? 'active' : ''}}" data-filter="all" bindtap="switchFilter">全部</view>
+    <view class="filter-item {{filter === 'joined' ? 'active' : ''}}" data-filter="joined" bindtap="switchFilter">已报名</view>
+    <view class="filter-item {{filter === 'cancelled' ? 'active' : ''}}" data-filter="cancelled" bindtap="switchFilter">已取消</view>
+  </view>
+
+  <view class="signup-list" wx:if="{{filtered.length > 0}}">
+    <view class="card signup-card" wx:for="{{filtered}}" wx:key="id">
+      <view class="card-head">
+        <view class="tag {{item.status}}">{{item.status_label}}</view>
+        <view class="signup-time">{{item.created_at}}</view>
+      </view>
+
+      <view class="course-row" bindtap="goDetail" data-token="{{item.course.share_token}}">
+        <image class="course-cover" src="{{item.course.cover_url || defaultCover}}" mode="aspectFill" />
+        <view class="course-main">
+          <view class="course-title">{{item.course.title || '活动已下架'}}</view>
+          <view class="course-meta">{{item.course.venue || '校区待定'}} · {{item.course.starts_at || '时间待定'}}</view>
+          <view class="course-progress">报名 {{item.course.signed_up_count}}/{{item.course.capacity}} · 我报 {{item.people_count}} 人</view>
+        </view>
+        <view class="course-arrow">›</view>
+      </view>
+
+      <view class="card-actions" wx:if="{{item.status === 'joined'}}">
+        <button class="cancel-btn" data-id="{{item.id}}" bindtap="cancelSignup">取消报名</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="empty" wx:elif="{{!loading}}">
+    <view class="empty-title">还没有拼课记录</view>
+    <view>看到喜欢的活动，点「立即报名」加入吧</view>
+    <button class="secondary-btn empty-btn" bindtap="goHome">去登录页看看</button>
+  </view>
+
+  <view class="loading-view" wx:if="{{loading}}">
+    <view class="skeleton"></view>
+    <view class="skeleton"></view>
+  </view>
+</view>

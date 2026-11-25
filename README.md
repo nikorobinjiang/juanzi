@@ -148,3 +148,59 @@ return [
 3. `php artisan migrate` —— 新迁移会为 users 表加 `username` / `organization_code` 列，并清空存量业务数据
 4. `php artisan optimize:clear` —— 清掉路由/配置缓存
 5. 宝塔/nginx：伪静态选择 Laravel 模板（`try_files $uri $uri/ /index.php?$query_string;`）、站点运行目录指向 `public/`，最后重启 PHP-FPM 与 nginx
+
+## 微信小程序拼课团课
+
+在原有 Laravel 项目内新增小程序开放接口与原生小程序工程，**共用同一个 `juanzi` 数据库**；现有约课/CRM/服务号提醒不受影响。
+
+### 目录与能力
+
+- `miniapp/`：原生微信小程序工程（WXML/WXSS/JS + TDesign），包含登录、机构创建拼课、活动详情、报名、海报、我的拼课。
+- `routes/api.php`：`/api/miniapp/*` 公开读接口（只凭 `share_token`）与 Sanctum token 写接口。
+- `routes/web.php`：`GET /a/{shareToken}` 公开 H5 活动页，可复制链接、微信内拉起小程序、微信外走 URL Scheme。
+- 新增表：`customers`、`group_courses`、`group_course_signups`、`personal_access_tokens`（Sanctum）。
+- 机构人员：选择机构 + 复用现有 `users` 用户名密码；客户：`wx.login` + 手机号授权，手机号是客户唯一键。
+- 分享：小程序卡片、带小程序码的 Canvas 海报（用户保存到相册后自行发朋友圈）、H5 链接。
+
+### 环境与配置
+
+在 `.env` 中补充：
+
+```dotenv
+WECHAT_MINIAPP_APP_ID=小程序AppID
+WECHAT_MINIAPP_SECRET=小程序AppSecret
+WECHAT_MINIAPP_QRCODE_CACHE_MINUTES=60
+MINIAPP_H5_URL=https://www.juanzi.site
+SANCTUM_GUARD=
+```
+
+- `miniapp/project.config.json` 中的 `appid` 从 `touristappid` 改为真实小程序 AppID。
+- 微信公众平台/小程序后台配置：
+  - request 合法域名：`https://www.juanzi.site`
+  - uploadFile 合法域名：`https://www.juanzi.site`（机构上传活动封面）
+  - downloadFile 合法域名：`https://www.juanzi.site`（海报下载小程序码）
+  - H5 业务域名：`https://www.juanzi.site`（`wx-open-launch-weapp` 需要服务号已认证并与小程序关联）
+- 小程序开发者工具打开 `miniapp/` 目录，先「构建 npm」生成 `miniprogram_npm/tdesign-miniprogram`，再预览/上传。
+
+### 部署顺序
+
+```bash
+# 本地提交后，服务器
+git pull
+composer install --no-interaction
+php artisan migrate --force
+php artisan storage:link
+php artisan optimize:clear
+```
+
+> 新增了 `laravel/sanctum` 依赖和 4 张表，旧数据不会被清空。若服务器 PHP-FPM/opcache 未自动刷新，重启 PHP-FPM。
+
+### 验收清单
+
+1. 机构人员登录 → 创建拼课并发布 → 生成海报/复制 H5 链接。
+2. 客户点小程序卡片/扫码/H5 进入详情 → 微信授权手机号 → 填写人数报名。
+3. 客户「我的拼课」查看报名、取消报名；机构查看报名名单。
+4. 同一机构重复报名被拒，名额满后不能再报，取消后名额释放。
+5. 跨机构人员不能编辑他人活动；未登录访问写接口返回 401。
+
+本期不含在线支付、退款、短信验证码、订阅消息推送和复杂拼团优惠规则。

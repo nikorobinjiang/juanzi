@@ -1,0 +1,119 @@
+.login-page {
+  padding-top: 0;
+}
+
+.hero {
+  position: relative;
+  overflow: hidden;
+  margin: 0 -32rpx 32rpx;
+  padding: 72rpx 48rpx 96rpx;
+  background: linear-gradient(135deg, #a78bfa 0%, #7c3aed 58%, #6d28d9 100%);
+  color: #fff;
+  border-radius: 0 0 48rpx 48rpx;
+}
+
+.hero-badge {
+  display: inline-block;
+  padding: 8rpx 20rpx;
+  border-radius: 24rpx;
+  font-size: 20rpx;
+  letter-spacing: 3rpx;
+  background: rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(8rpx);
+}
+
+.hero-title {
+  margin-top: 24rpx;
+  font-size: 56rpx;
+  font-weight: 600;
+  letter-spacing: 4rpx;
+}
+
+.hero-subtitle {
+  margin-top: 8rpx;
+  font-size: 26rpx;
+  opacity: 0.86;
+}
+
+.hero-glow {
+  position: absolute;
+  right: -80rpx;
+  top: -60rpx;
+  width: 300rpx;
+  height: 300rpx;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.3), transparent 70%);
+}
+
+.role-card {
+  margin-top: -48rpx;
+  position: relative;
+  z-index: 2;
+}
+
+.segment {
+  display: flex;
+  padding: 8rpx;
+  background: #f3f4f6;
+  border-radius: 28rpx;
+  margin-bottom: 40rpx;
+}
+
+.segment-item {
+  flex: 1;
+  text-align: center;
+  padding: 18rpx 0;
+  font-size: 28rpx;
+  color: #6b7280;
+  border-radius: 22rpx;
+  transition: all 0.25s ease;
+}
+
+.segment-item.active {
+  color: #7c3aed;
+  background: #fff;
+  font-weight: 600;
+  box-shadow: 0 8rpx 20rpx rgba(124, 58, 237, 0.12);
+}
+
+.form {
+  animation: page-fade-in 0.25s ease both;
+}
+
+.arrow {
+  color: #9ca3af;
+  font-size: 40rpx;
+  line-height: 1;
+}
+
+.wechat-btn {
+  margin-top: 8rpx;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 24rpx;
+  margin: 28rpx 0;
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  height: 1rpx;
+  background: #eef0f4;
+}
+
+.divider text {
+  padding: 0 20rpx;
+}
+
+.hint {
+  margin-top: 24rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+  line-height: 1.6;
+}

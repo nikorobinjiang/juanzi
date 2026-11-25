@@ -1,0 +1,45 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/staff/activities/index",
+    "pages/staff/create/index",
+    "pages/activity/detail/index",
+    "pages/activity/signup/index",
+    "pages/customer/mine/index",
+    "pages/share/poster/index"
+  ],
+  "window": {
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "约刻拼课",
+    "backgroundColor": "#F5F6FA",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#9CA3AF",
+    "selectedColor": "#7C3AED",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/login/index",
+        "text": "登录"
+      },
+      {
+        "pagePath": "pages/staff/activities/index",
+        "text": "机构管理"
+      },
+      {
+        "pagePath": "pages/customer/mine/index",
+        "text": "我的拼课"
+      }
+    ]
+  },
+  "permission": {
+    "scope.writePhotosAlbum": {
+      "desc": "用于保存活动海报到相册，方便分享到朋友圈"
+    }
+  },
+  "style": "v2",
+  "renderer": "webview"
+}

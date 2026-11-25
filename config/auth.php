@@ -40,6 +40,11 @@ return [
             'driver' => 'session',
             'provider' => 'users',
         ],
+
+        // 小程序 token 鉴权：tokenable 可能是 User 或 Customer，不能绑定单一 provider
+        'sanctum' => [
+            'driver' => 'sanctum',
+        ],
     ],
 
     /*

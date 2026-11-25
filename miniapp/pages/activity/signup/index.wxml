@@ -1,0 +1,50 @@
+<view class="page signup-page">
+  <view class="card activity-summary" wx:if="{{activity}}">
+    <image class="cover" src="{{activity.cover_url || defaultCover}}" mode="aspectFill" />
+    <view class="summary-main">
+      <view class="summary-title">{{activity.title}}</view>
+      <view class="summary-meta">{{activity.venue || '未填写校区'}} · {{activity.address || '地址待定'}}</view>
+      <view class="summary-progress">报名 {{activity.signed_up_count}}/{{activity.capacity}}</view>
+    </view>
+  </view>
+
+  <view class="card form-card">
+    <view class="section-title">报名信息</view>
+
+    <view class="field">
+      <view class="field-label">拼课人数</view>
+      <view class="stepper">
+        <view class="stepper-btn" bindtap="decrease">−</view>
+        <input class="stepper-input" type="number" value="{{peopleCount}}" bindinput="onPeopleInput" />
+        <view class="stepper-btn" bindtap="increase">＋</view>
+        <view class="stepper-tip">最多 {{activity.remaining || 0}} 人</view>
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">联系人姓名</view>
+      <input class="field-input" value="{{name}}" data-field="name" bindinput="onInput" placeholder="请输入联系人姓名" maxlength="50" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">联系方式</view>
+      <input class="field-input" value="{{phone}}" data-field="phone" bindinput="onInput" type="number" maxlength="11" placeholder="默认使用微信登录手机号，可修改" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">备注（选填）</view>
+      <textarea class="field-textarea" value="{{remark}}" data-field="remark" bindinput="onInput" placeholder="如方便上课的时间、水平等级等" maxlength="500" />
+    </view>
+  </view>
+
+  <view class="notice">
+    <view class="notice-dot"></view>
+    <text>报名后可在「我的拼课」查看记录，如需取消请提前联系机构。</text>
+  </view>
+
+  <view class="bottom-placeholder"></view>
+</view>
+
+<view class="bottom-bar">
+  <button class="primary-btn" loading="{{loading}}" bindtap="submit">确认报名</button>
+</view>

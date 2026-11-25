@@ -1,0 +1,103 @@
+<view class="page create-page">
+  <view class="create-hero">
+    <view class="create-title">{{id ? '编辑拼课' : '创建拼课'}}</view>
+    <view class="create-sub">填写活动信息，发布后即可分享给客户报名</view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">基础信息</view>
+
+    <view class="field">
+      <view class="field-label">拼课标题</view>
+      <input class="field-input" value="{{title}}" data-field="title" bindinput="onInput" placeholder="如：网球反手提升多球训练" maxlength="100" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">活动介绍</view>
+      <textarea class="field-textarea" value="{{description}}" data-field="description" bindinput="onInput" placeholder="介绍训练内容、适合人群、注意事项等" maxlength="2000" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">活动封面（选填）</view>
+      <view class="upload-box" bindtap="chooseCover">
+        <image wx:if="{{coverUrl}}" class="upload-preview" src="{{coverUrl}}" mode="aspectFill" />
+        <view wx:else class="upload-placeholder">
+          <view class="upload-icon">＋</view>
+          <view>点击上传封面图</view>
+          <view class="upload-tip">建议竖版图片，不超过 2MB</view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">时间地点</view>
+
+    <view class="field">
+      <view class="field-label">校区名称</view>
+      <input class="field-input" value="{{venue}}" data-field="venue" bindinput="onInput" placeholder="如：NetX Sports 双网体育俱乐部" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">联系电话</view>
+      <input class="field-input" value="{{contactPhone}}" data-field="contactPhone" bindinput="onInput" type="number" maxlength="20" placeholder="客户可在详情页一键拨打" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">活动地址</view>
+      <input class="field-input" value="{{address}}" data-field="address" bindinput="onInput" placeholder="详细上课地址" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">开始时间</view>
+      <view class="datetime-row">
+        <picker mode="date" value="{{startDate}}" data-field="startDate" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{startDate || '选择日期'}}</view>
+        </picker>
+        <picker mode="time" value="{{startTime}}" data-field="startTime" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{startTime || '选择时间'}}</view>
+        </picker>
+      </view>
+    </view>
+
+    <view class="field">
+      <view class="field-label">结束时间（选填）</view>
+      <view class="datetime-row">
+        <picker mode="date" value="{{endDate}}" data-field="endDate" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{endDate || '选择日期'}}</view>
+        </picker>
+        <picker mode="time" value="{{endTime}}" data-field="endTime" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{endTime || '选择时间'}}</view>
+        </picker>
+      </view>
+    </view>
+  </view>
+
+  <view class="card">
+    <view class="section-title">报名设置</view>
+
+    <view class="field">
+      <view class="field-label">报名人数上限</view>
+      <input class="field-input" value="{{capacity}}" data-field="capacity" bindinput="onInput" type="number" placeholder="如：8" />
+    </view>
+
+    <view class="field">
+      <view class="field-label">报名截止时间（选填）</view>
+      <view class="datetime-row">
+        <picker mode="date" value="{{deadlineDate}}" data-field="deadlineDate" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{deadlineDate || '选择日期'}}</view>
+        </picker>
+        <picker mode="time" value="{{deadlineTime}}" data-field="deadlineTime" bindchange="onPickerChange">
+          <view class="field-picker picker-half">{{deadlineTime || '选择时间'}}</view>
+        </picker>
+      </view>
+    </view>
+  </view>
+
+  <view class="bottom-placeholder"></view>
+</view>
+
+<view class="bottom-bar create-actions">
+  <button class="secondary-btn" loading="{{loading}}" data-publish="0" bindtap="submit">保存草稿</button>
+  <button class="primary-btn" loading="{{loading}}" data-publish="1" bindtap="submit">{{id ? '保存并发布' : '发布拼课'}}</button>
+</view>

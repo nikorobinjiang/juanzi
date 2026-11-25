@@ -1,0 +1,39 @@
+{
+  "compileType": "miniprogram",
+  "miniprogramRoot": "miniapp/",
+  "appid": "wxf596e5b8bb11c82d",
+  "projectname": "yueke",
+  "setting": {
+    "es6": true,
+    "postcss": true,
+    "minified": true,
+    "uglifyFileName": false,
+    "enhance": true,
+    "packNpmRelationList": [],
+    "babelSetting": {
+      "ignore": [],
+      "disablePlugins": [],
+      "outputPath": ""
+    },
+    "useCompilerPlugins": false
+  },
+  "packOptions": {
+    "ignore": [
+      { "type": "folder", "value": "app" },
+      { "type": "folder", "value": "bootstrap" },
+      { "type": "folder", "value": "config" },
+      { "type": "folder", "value": "database" },
+      { "type": "folder", "value": "node_modules" },
+      { "type": "folder", "value": "public" },
+      { "type": "folder", "value": "resources" },
+      { "type": "folder", "value": "routes" },
+      { "type": "folder", "value": "storage" },
+      { "type": "folder", "value": "tests" },
+      { "type": "folder", "value": "tools" },
+      { "type": "folder", "value": "vendor" }
+    ],
+    "include": []
+  },
+  "simulatorPluginLibVersion": {},
+  "editorSetting": {}
+}

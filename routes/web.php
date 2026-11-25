@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\MiniAppH5Controller;
 use App\Http\Controllers\WechatBindController;
 use App\Http\Controllers\WechatServerController;
 use Illuminate\Support\Facades\Route;
@@ -17,6 +18,11 @@ Route::prefix('wechat')->group(function () {
     Route::get('/server', [WechatServerController::class, 'verify'])->name('wechat.server.verify');
     Route::post('/server', [WechatServerController::class, 'handle'])->name('wechat.server.handle');
 });
+
+// 小程序分享 H5 活动页：免登录，所有数据与小程序详情共用 share_token
+Route::get('/a/{shareToken}', [MiniAppH5Controller::class, 'show'])
+    ->where('shareToken', '[A-Za-z0-9_-]+')
+    ->name('miniapp.h5.activity');
 
 // 未登录：登录 / 注册
 Route::middleware('guest')->group(function () {

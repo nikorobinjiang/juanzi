@@ -7,6 +7,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -192,6 +193,342 @@ class WechatService
         Cache::put((string) config('wechat.access_token.cache_key'), $token, now()->addSeconds($expires));
 
         return $token;
+    }
+
+    /* -----------------------------------------------------------------
+     | 微信小程序 / H5 JS-SDK
+     | ----------------------------------------------------------------- */
+
+    /** 小程序凭证是否已配置 */
+    public function miniAppConfigured(): bool
+    {
+        return $this->miniAppAppId() !== '' && $this->miniAppSecret() !== '';
+    }
+
+    /**
+     * wx.login 的 code 换取 openid / unionid / session_key
+     *
+     * session_key 只在内存里返回给登录服务，绝不写日志或缓存。
+     *
+     * @return array{openid: string, unionid: string, session_key: string}
+     */
+    public function miniAppCode2Session(string $code): array
+    {
+        $code = trim($code);
+
+        if ($code === '' || ! $this->miniAppConfigured()) {
+            throw new RuntimeException('未配置微信小程序 AppID / AppSecret，无法完成登录');
+        }
+
+        try {
+            $response = $this->http()->get($this->apiBase().'/sns/jscode2session', [
+                'appid' => $this->miniAppAppId(),
+                'secret' => $this->miniAppSecret(),
+                'js_code' => $code,
+                'grant_type' => 'authorization_code',
+            ]);
+        } catch (ConnectionException $e) {
+            Log::warning('微信小程序 code2session 连接失败', ['error' => $e->getMessage()]);
+
+            throw new RuntimeException('微信登录服务暂时不可用，请稍后重试');
+        }
+
+        $data = $response->json() ?? [];
+
+        if (isset($data['errcode']) && (int) $data['errcode'] !== 0) {
+            Log::warning('微信小程序 code2session 失败', [
+                'errcode' => $data['errcode'] ?? '',
+                'errmsg' => $data['errmsg'] ?? '',
+            ]);
+
+            throw new RuntimeException('微信登录失败，请稍后重试');
+        }
+
+        $openid = trim((string) ($data['openid'] ?? ''));
+
+        if ($openid === '') {
+            throw new RuntimeException('微信登录未返回 openid');
+        }
+
+        return [
+            'openid' => $openid,
+            'unionid' => trim((string) ($data['unionid'] ?? '')),
+            'session_key' => (string) ($data['session_key'] ?? ''),
+        ];
+    }
+
+    /** 手机号快速验证组件返回的 code 换手机号；失败返回 null，由调用方走手动填写兜底 */
+    public function miniAppPhoneNumber(string $phoneCode): ?string
+    {
+        $phoneCode = trim($phoneCode);
+
+        if ($phoneCode === '' || ! $this->miniAppConfigured()) {
+            return null;
+        }
+
+        try {
+            $response = $this->http()->withToken($this->miniAppAccessToken())
+                ->post($this->apiBase().'/wxa/business/getuserphonenumber', ['code' => $phoneCode]);
+        } catch (ConnectionException|RuntimeException $e) {
+            Log::warning('微信小程序手机号接口调用失败', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        $data = $response->json() ?? [];
+        $errcode = (string) ($data['errcode'] ?? '0');
+
+        if ($response->failed() || $errcode !== '0') {
+            Log::warning('微信小程序手机号接口失败', ['errcode' => $errcode, 'errmsg' => $data['errmsg'] ?? '']);
+
+            return null;
+        }
+
+        $phone = trim((string) (data_get($data, 'phone_info.phoneNumber') ?? ''));
+
+        return $phone !== '' ? $phone : null;
+    }
+
+    /** 小程序专用 access_token：独立缓存与锁，不能复用服务号 token */
+    public function miniAppAccessToken(bool $forceRefresh = false): string
+    {
+        if (! $this->miniAppConfigured()) {
+            throw new RuntimeException('未配置微信小程序 AppID / AppSecret，无法调用接口');
+        }
+
+        if (! $forceRefresh) {
+            $cached = Cache::get($this->miniAppTokenCacheKey());
+
+            if (is_string($cached) && $cached !== '') {
+                return $cached;
+            }
+        }
+
+        $lock = Cache::lock($this->miniAppTokenLockKey(), (int) config('wechat.miniapp.access_token.lock_seconds', 10));
+        $token = $lock->block(5, function () use ($forceRefresh): string {
+            if (! $forceRefresh) {
+                $cached = Cache::get($this->miniAppTokenCacheKey());
+
+                if (is_string($cached) && $cached !== '') {
+                    return $cached;
+                }
+            }
+
+            return $this->refreshMiniAppAccessToken();
+        });
+
+        if (! is_string($token) || $token === '') {
+            throw new RuntimeException('微信 access_token 刷新竞争超时，请稍后重试');
+        }
+
+        return $token;
+    }
+
+    /**
+     * 获取不限制生成数量的小程序码（二进制 PNG）
+     *
+     * @throws RuntimeException
+     */
+    public function getMiniAppQrcode(string $scene, string $page = ''): string
+    {
+        $payload = [
+            'scene' => $scene,
+            'check_path' => false,
+        ];
+
+        if ($page !== '') {
+            $payload['page'] = $page;
+        }
+
+        try {
+            $response = $this->http()->withToken($this->miniAppAccessToken())
+                ->asJson()
+                ->post($this->apiBase().'/wxa/getwxacodeunlimit', $payload);
+        } catch (ConnectionException $e) {
+            Log::warning('微信小程序码接口连接失败', ['error' => $e->getMessage()]);
+
+            throw new RuntimeException('小程序码生成服务暂时不可用');
+        }
+
+        $body = $response->body();
+        $trimmed = ltrim($body);
+
+        // 成功时是 PNG 二进制；失败时微信返回 JSON
+        if ($response->failed() || str_starts_with($trimmed, '{')) {
+            $data = json_decode($body, true) ?: [];
+            Log::warning('微信小程序码生成失败', [
+                'errcode' => $data['errcode'] ?? '',
+                'errmsg' => $data['errmsg'] ?? '',
+            ]);
+
+            throw new RuntimeException('小程序码生成失败，请稍后重试');
+        }
+
+        return $body;
+    }
+
+    /** 生成小程序 URL Scheme（微信外打开用）；失败返回 null */
+    public function miniAppScheme(string $scene, string $page = ''): ?string
+    {
+        $page = $page !== '' ? $page : (string) config('wechat.miniapp.detail_page', 'pages/activity/detail/index');
+
+        try {
+            $response = $this->http()->withToken($this->miniAppAccessToken())
+                ->asJson()
+                ->post($this->apiBase().'/wxa/generate_scheme', [
+                    'jump_wxa' => [
+                        'path' => $page,
+                        'query' => 's='.$scene,
+                    ],
+                    'expire_type' => 1,
+                    'expire_interval' => 30,
+                ]);
+        } catch (ConnectionException $e) {
+            Log::warning('微信小程序 Scheme 接口连接失败', ['error' => $e->getMessage()]);
+
+            return null;
+        }
+
+        $data = $response->json() ?? [];
+
+        if ($response->failed() || (int) ($data['errcode'] ?? 0) !== 0) {
+            Log::warning('微信小程序 Scheme 生成失败', [
+                'errcode' => $data['errcode'] ?? '',
+                'errmsg' => $data['errmsg'] ?? '',
+            ]);
+
+            return null;
+        }
+
+        $scheme = trim((string) ($data['openlink'] ?? ''));
+
+        return $scheme !== '' ? $scheme : null;
+    }
+
+    /** H5 在微信内拉起小程序所需的 JS-SDK 签名 */
+    public function jsapiSignature(string $url): array
+    {
+        $ticket = $this->jsapiTicket();
+        $nonceStr = Str::random(16);
+        $timestamp = time();
+        $string = 'jsapi_ticket='.$ticket.'&noncestr='.$nonceStr.'&timestamp='.$timestamp.'&url='.$url;
+
+        return [
+            'appId' => $this->appId(),
+            'timestamp' => $timestamp,
+            'nonceStr' => $nonceStr,
+            'signature' => sha1($string),
+        ];
+    }
+
+    /** @throws RuntimeException */
+    private function jsapiTicket(): string
+    {
+        $cached = Cache::get((string) config('wechat.jsapi_ticket.cache_key'));
+
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+
+        $lock = Cache::lock((string) config('wechat.jsapi_ticket.lock_key', 'wechat:jsapi_ticket:lock'),
+            (int) config('wechat.jsapi_ticket.lock_seconds', 10));
+        $ticket = $lock->block(5, function (): string {
+            $cached = Cache::get((string) config('wechat.jsapi_ticket.cache_key'));
+
+            if (is_string($cached) && $cached !== '') {
+                return $cached;
+            }
+
+            try {
+                $response = $this->http()->get($this->apiBase().'/cgi-bin/ticket/getticket', [
+                    'access_token' => $this->accessToken(),
+                    'type' => 'jsapi',
+                ]);
+            } catch (ConnectionException $e) {
+                Log::warning('微信 JS-SDK ticket 连接失败', ['error' => $e->getMessage()]);
+
+                throw new RuntimeException('微信 JS-SDK 服务暂时不可用');
+            }
+
+            $data = $response->json() ?? [];
+            $value = trim((string) ($data['ticket'] ?? ''));
+
+            if ($response->failed() || $value === '') {
+                Log::warning('微信 JS-SDK ticket 获取失败', [
+                    'errcode' => $data['errcode'] ?? '',
+                    'errmsg' => $data['errmsg'] ?? '',
+                ]);
+
+                throw new RuntimeException('微信 JS-SDK 签名失败');
+            }
+
+            $expires = max(60, (int) ($data['expires_in'] ?? 7200)
+                - (int) config('wechat.jsapi_ticket.refresh_margin', 300));
+            Cache::put((string) config('wechat.jsapi_ticket.cache_key'), $value, now()->addSeconds($expires));
+
+            return $value;
+        });
+
+        if (! is_string($ticket) || $ticket === '') {
+            throw new RuntimeException('微信 JS-SDK ticket 刷新竞争超时，请稍后重试');
+        }
+
+        return $ticket;
+    }
+
+    /** @throws RuntimeException */
+    private function refreshMiniAppAccessToken(): string
+    {
+        try {
+            $response = $this->http()->get($this->apiBase().'/cgi-bin/token', [
+                'grant_type' => 'client_credential',
+                'appid' => $this->miniAppAppId(),
+                'secret' => $this->miniAppSecret(),
+            ]);
+        } catch (ConnectionException $e) {
+            Log::error('微信小程序 access_token 接口连接失败', ['error' => $e->getMessage()]);
+
+            throw new RuntimeException('微信接口连接失败，无法获取 access_token');
+        }
+
+        $data = $response->json() ?? [];
+        $token = trim((string) ($data['access_token'] ?? ''));
+
+        if ($response->failed() || $token === '') {
+            Log::error('微信小程序 access_token 获取失败', [
+                'status' => $response->status(),
+                'errcode' => $data['errcode'] ?? '',
+                'errmsg' => $data['errmsg'] ?? '',
+            ]);
+
+            throw new RuntimeException('微信 access_token 获取失败');
+        }
+
+        $expires = max(60, (int) ($data['expires_in'] ?? 7200)
+            - (int) config('wechat.miniapp.access_token.refresh_margin', 300));
+        Cache::put($this->miniAppTokenCacheKey(), $token, now()->addSeconds($expires));
+
+        return $token;
+    }
+
+    private function miniAppAppId(): string
+    {
+        return trim((string) config('wechat.miniapp.app_id'));
+    }
+
+    private function miniAppSecret(): string
+    {
+        return trim((string) config('wechat.miniapp.secret'));
+    }
+
+    private function miniAppTokenCacheKey(): string
+    {
+        return (string) config('wechat.miniapp.access_token.cache_key', 'wechat:miniapp:access_token');
+    }
+
+    private function miniAppTokenLockKey(): string
+    {
+        return (string) config('wechat.miniapp.access_token.lock_key', 'wechat:miniapp:access_token:lock');
     }
 
     /* -----------------------------------------------------------------

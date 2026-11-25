@@ -1,0 +1,108 @@
+.signup-page {
+  padding-bottom: 200rpx;
+}
+
+.activity-summary {
+  display: flex;
+  align-items: center;
+  padding: 24rpx;
+}
+
+.cover {
+  width: 140rpx;
+  height: 140rpx;
+  border-radius: 20rpx;
+  background: #ede9fe;
+  margin-right: 24rpx;
+  flex-shrink: 0;
+}
+
+.summary-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.summary-title {
+  font-size: 30rpx;
+  font-weight: 600;
+  color: #1f2937;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-meta {
+  margin-top: 8rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-progress {
+  margin-top: 12rpx;
+  display: inline-block;
+  font-size: 22rpx;
+  color: #7c3aed;
+  background: #f3efff;
+  padding: 6rpx 18rpx;
+  border-radius: 20rpx;
+}
+
+.stepper {
+  display: flex;
+  align-items: center;
+}
+
+.stepper-btn {
+  width: 80rpx;
+  height: 80rpx;
+  line-height: 76rpx;
+  text-align: center;
+  font-size: 40rpx;
+  color: #7c3aed;
+  background: #f3efff;
+  border-radius: 20rpx;
+  transition: transform 0.15s ease;
+}
+
+.stepper-btn:active {
+  transform: scale(0.92);
+}
+
+.stepper-input {
+  width: 120rpx;
+  height: 80rpx;
+  margin: 0 16rpx;
+  text-align: center;
+  font-size: 32rpx;
+  font-weight: 600;
+  color: #1f2937;
+  background: #f9fafb;
+  border-radius: 20rpx;
+}
+
+.stepper-tip {
+  margin-left: 20rpx;
+  font-size: 24rpx;
+  color: #9ca3af;
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  padding: 8rpx 16rpx 0;
+  font-size: 24rpx;
+  color: #9ca3af;
+  line-height: 1.6;
+}
+
+.notice-dot {
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #a78bfa;
+  margin: 12rpx 16rpx 0 0;
+  flex-shrink: 0;
+}

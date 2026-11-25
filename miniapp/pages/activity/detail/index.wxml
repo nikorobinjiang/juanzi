@@ -1,0 +1,75 @@
+<view class="page detail-page" wx:if="{{!loading && activity}}">
+  <view class="card info-card">
+    <view class="info-row" bindtap="copyAddress" data-value="{{activity.venue}}">
+      <view class="info-icon venue">校</view>
+      <view class="info-content">
+        <view class="info-label">校区</view>
+        <view class="info-value">{{activity.venue || '未填写'}}</view>
+      </view>
+    </view>
+
+    <view class="info-row" bindtap="callPhone">
+      <view class="info-icon phone">电</view>
+      <view class="info-content">
+        <view class="info-label">联系电话</view>
+        <view class="info-value phone-value">{{activity.contact_phone || '未填写'}}</view>
+      </view>
+      <view class="info-action">拨打 ›</view>
+    </view>
+
+    <view class="info-row" bindtap="copyAddress" data-value="{{activity.address}}">
+      <view class="info-icon address">址</view>
+      <view class="info-content">
+        <view class="info-label">活动地址</view>
+        <view class="info-value">{{activity.address || '未填写'}}</view>
+      </view>
+      <view class="info-action">复制 ›</view>
+    </view>
+  </view>
+
+  <view class="card signup-card">
+    <view class="signup-head">
+      <view class="signup-title">报名 {{activity.signed_up_count}}/{{activity.capacity}}</view>
+      <view class="tag" wx:if="{{activity.remaining > 0}}">还剩 {{activity.remaining}} 个名额</view>
+      <view class="tag full" wx:else>名额已满</view>
+    </view>
+
+    <view class="progress-track">
+      <view class="progress-fill" style="width: {{percent}}%"></view>
+    </view>
+
+    <view class="signup-list" wx:if="{{activity.signups.length > 0}}">
+      <view class="signup-item" wx:for="{{activity.signups}}" wx:key="id">
+        <view class="avatar">{{item.avatar}}</view>
+        <view class="signup-main">
+          <view class="signup-name">{{item.name}}</view>
+          <view class="signup-sub">报名：{{item.people_count}} 人</view>
+        </view>
+        <view class="recent">近期报名{{item.recent_count}}次</view>
+      </view>
+    </view>
+    <view class="empty-inline" wx:else>还没有人报名，抢先加入吧</view>
+  </view>
+
+  <view class="card intro-card">
+    <view class="section-title">活动介绍</view>
+    <view class="intro-text">{{activity.description || '教练将通过系统的训练计划，帮助学员提升技术水平。'}}</view>
+    <view class="meta-row" wx:if="{{activity.starts_at}}">
+      <text class="meta-label">活动时间</text>
+      <text class="meta-value">{{activity.starts_at}} <block wx:if="{{activity.ends_at}}">— {{activity.ends_at}}</block></text>
+    </view>
+  </view>
+
+  <view class="bottom-placeholder"></view>
+</view>
+
+<view class="loading-view" wx:if="{{loading}}">
+  <view class="skeleton skeleton-lg"></view>
+  <view class="skeleton"></view>
+  <view class="skeleton skeleton-sm"></view>
+</view>
+
+<view class="bottom-bar detail-actions" wx:if="{{!loading && activity}}">
+  <button class="secondary-btn" bindtap="goPoster">生成海报</button>
+  <button class="primary-btn" bindtap="goSignup">立即报名</button>
+</view>

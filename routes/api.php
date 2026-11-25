@@ -8,6 +8,9 @@ use App\Http\Controllers\BookingController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\ExcelController;
 use App\Http\Controllers\GenerateController;
+use App\Http\Controllers\MiniAppActivityController;
+use App\Http\Controllers\MiniAppAuthController;
+use App\Http\Controllers\MiniAppSignupController;
 use App\Http\Controllers\OverviewController;
 use Illuminate\Support\Facades\Route;
 
@@ -76,6 +79,43 @@ Route::middleware('auth')->group(function () {
         Route::middleware('super.admin')->group(function () {
             Route::get('/organizations', [AdminOrganizationController::class, 'index']);
             Route::post('/switch-organization', [AdminOrganizationController::class, 'switchOrganization']);
+        });
+    });
+});
+
+/*
+ | 微信小程序拼课团课开放接口
+ | 与现有 /api/* web session 接口完全隔离：公开读只凭 share_token，写操作用 Sanctum token。
+ */
+Route::prefix('miniapp')->group(function () {
+    // 公开：机构下拉、登录、活动详情
+    Route::get('/organizations', [MiniAppAuthController::class, 'organizations']);
+    Route::post('/auth/staff', [MiniAppAuthController::class, 'staffLogin']);
+    Route::post('/auth/customer', [MiniAppAuthController::class, 'customerLogin']);
+    Route::get('/activities/{shareToken}', [MiniAppActivityController::class, 'show']);
+    Route::get('/qrcode/{shareToken}', [MiniAppActivityController::class, 'publicQrcode']);
+    Route::get('/scheme/{shareToken}', [MiniAppActivityController::class, 'publicScheme']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('/me', [MiniAppAuthController::class, 'me']);
+
+        // 机构人员
+        Route::middleware('miniapp.staff')->group(function () {
+            Route::get('/activities', [MiniAppActivityController::class, 'index']);
+            Route::post('/activities', [MiniAppActivityController::class, 'store']);
+            Route::post('/uploads', [MiniAppActivityController::class, 'uploadCover']);
+            Route::put('/activities/{activity}', [MiniAppActivityController::class, 'update'])->whereNumber('activity');
+            Route::post('/activities/{activity}/publish', [MiniAppActivityController::class, 'publish'])->whereNumber('activity');
+            Route::get('/activities/{activity}/signups', [MiniAppActivityController::class, 'signups'])->whereNumber('activity');
+            Route::get('/activities/{activity}/qrcode', [MiniAppActivityController::class, 'qrcode'])->whereNumber('activity');
+            Route::get('/activities/{activity}/scheme', [MiniAppActivityController::class, 'scheme'])->whereNumber('activity');
+        });
+
+        // 客户
+        Route::middleware('miniapp.customer')->group(function () {
+            Route::post('/activities/{shareToken}/signup', [MiniAppSignupController::class, 'store']);
+            Route::get('/customer/signups', [MiniAppSignupController::class, 'mine']);
+            Route::post('/customer/signups/{signup}/cancel', [MiniAppSignupController::class, 'cancel'])->whereNumber('signup');
         });
     });
 });
