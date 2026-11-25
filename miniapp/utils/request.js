@@ -11,6 +11,7 @@ function request(options) {
   return new Promise((resolve, reject) => {
     const header = {
       'Content-Type': 'application/json',
+      'Accept': 'application/json',
     };
 
     if (auth) {
